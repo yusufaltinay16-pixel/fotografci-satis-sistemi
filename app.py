@@ -1,0 +1,287 @@
+import os, sqlite3
+from datetime import date, datetime
+from functools import wraps
+from flask import Flask, request, redirect, url_for, session, flash, render_template
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "CHANGE-THIS-SECRET-KEY")
+DB_PATH = os.environ.get("DB_PATH", "fotografci.db")
+if DB_PATH.startswith("sqlite:///"):
+    DB_PATH = DB_PATH.replace("sqlite:///", "", 1)
+os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+
+def db():
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    return c
+
+def init_db():
+    with db() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS users(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL, full_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'seller',
+          commission REAL NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS rates(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, rate_date TEXT NOT NULL, currency TEXT NOT NULL,
+          rate REAL NOT NULL, UNIQUE(rate_date,currency));
+        CREATE TABLE IF NOT EXISTS sales(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, sale_date TEXT NOT NULL,
+          quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount REAL NOT NULL, exchange_rate REAL NOT NULL,
+          total_tl REAL NOT NULL, payment_type TEXT NOT NULL, note TEXT DEFAULT '',
+          commission_rate REAL NOT NULL, commission_tl REAL NOT NULL,
+          FOREIGN KEY(seller_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS expenses(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
+          amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS payments(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, payment_date TEXT NOT NULL,
+          amount REAL NOT NULL, note TEXT DEFAULT '', FOREIGN KEY(seller_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS closures(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+          closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
+          total_expenses REAL NOT NULL, shop_net REAL NOT NULL);
+        """)
+        admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
+        if not admin:
+            c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
+                      ("admin", generate_password_hash("Admin123!"), "Yönetici", "admin", 0))
+
+init_db()
+
+def login_required(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return wrapped
+
+def admin_required(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if session.get("role") != "admin":
+            flash("Bu bölüm yalnızca yöneticiye açıktır.")
+            return redirect(url_for("dashboard"))
+        return f(*args, **kwargs)
+    return wrapped
+
+def current_user():
+    with db() as c:
+        return c.execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
+
+@app.context_processor
+def inject_user():
+    return {"me": current_user() if session.get("user_id") else None}
+
+@app.route("/")
+def home():
+    return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method == "POST":
+        with db() as c:
+            u = c.execute("SELECT * FROM users WHERE username=? AND active=1", (request.form["username"].strip(),)).fetchone()
+        if u and check_password_hash(u["password"], request.form["password"]):
+            session.update(user_id=u["id"], role=u["role"], name=u["full_name"])
+            return redirect(url_for("dashboard"))
+        flash("Kullanıcı adı veya şifre hatalı.")
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+@app.route("/change-password", methods=["GET","POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        old = request.form["old_password"]
+        new = request.form["new_password"]
+        if len(new) < 8:
+            flash("Yeni şifre en az 8 karakter olmalı.")
+        else:
+            with db() as c:
+                u = c.execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
+                if not check_password_hash(u["password"], old):
+                    flash("Mevcut şifre yanlış.")
+                else:
+                    c.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new), session["user_id"]))
+                    flash("Şifreniz değiştirildi.")
+                    return redirect(url_for("dashboard"))
+    return render_template("change_password.html")
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    today = date.today().isoformat()
+    start = request.args.get("start", today[:8]+"01")
+    end = request.args.get("end", today)
+    with db() as c:
+        params = [start,end]
+        seller_filter = ""
+        if session["role"] != "admin":
+            seller_filter = " AND seller_id=?"
+            params.append(session["user_id"])
+        sales = c.execute(f"SELECT s.*,u.full_name FROM sales s JOIN users u ON u.id=s.seller_id WHERE sale_date BETWEEN ? AND ?{seller_filter} ORDER BY s.id DESC", params).fetchall()
+        totals = c.execute(f"SELECT COALESCE(SUM(total_tl),0) sales, COALESCE(SUM(commission_tl),0) commission, COALESCE(SUM(quantity),0) qty FROM sales WHERE sale_date BETWEEN ? AND ?{seller_filter}", params).fetchone()
+        if session["role"] == "admin":
+            expenses = c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?", (start,end)).fetchone()["n"]
+            seller_rows = c.execute("""SELECT u.id,u.full_name,u.commission,COALESCE(SUM(s.total_tl),0) sales,
+              COALESCE(SUM(s.commission_tl),0) earned FROM users u LEFT JOIN sales s ON s.seller_id=u.id
+              AND s.sale_date BETWEEN ? AND ? WHERE u.role='seller' AND u.active=1 GROUP BY u.id ORDER BY u.full_name""",(start,end)).fetchall()
+        else:
+            expenses, seller_rows = 0, []
+    return render_template("dashboard.html", sales=sales, totals=totals, expenses=expenses,
+                           seller_rows=seller_rows, start=start, end=end)
+
+@app.route("/sale", methods=["GET","POST"])
+@login_required
+def sale():
+    if request.method == "POST":
+        seller_id = session["user_id"] if session["role"] != "admin" else int(request.form["seller_id"])
+        sale_date = request.form.get("sale_date") or date.today().isoformat()
+        qty = int(request.form["quantity"])
+        currency = request.form["currency"]
+        amount = float(request.form["amount"])
+        payment = request.form["payment_type"]
+        with db() as c:
+            seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
+            if not seller: flash("Satıcı bulunamadı."); return redirect(url_for("sale"))
+            if currency == "TL":
+                rate = 1.0
+            else:
+                rate_row = c.execute("SELECT rate FROM rates WHERE rate_date=? AND currency=?",(sale_date,currency)).fetchone()
+                if not rate_row:
+                    flash(f"{sale_date} tarihi için {currency} kuru girilmemiş. Önce yönetici kur girmeli.")
+                    return redirect(url_for("sale"))
+                rate = float(rate_row["rate"])
+            total_tl = amount * rate
+            commission = total_tl * float(seller["commission"]) / 100
+            c.execute("""INSERT INTO sales(seller_id,sale_date,quantity,currency,amount,exchange_rate,total_tl,
+              payment_type,note,commission_rate,commission_tl) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+              (seller_id,sale_date,qty,currency,amount,rate,total_tl,payment,request.form.get("note",""),
+               seller["commission"],commission))
+        flash("Satış kaydedildi.")
+        return redirect(url_for("dashboard"))
+    with db() as c:
+        sellers = c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
+    return render_template("sale.html", sellers=sellers, today=date.today().isoformat())
+
+@app.route("/rates", methods=["GET","POST"])
+@login_required
+@admin_required
+def rates():
+    if request.method == "POST":
+        with db() as c:
+            c.execute("INSERT INTO rates(rate_date,currency,rate) VALUES(?,?,?) ON CONFLICT(rate_date,currency) DO UPDATE SET rate=excluded.rate",
+                      (request.form["rate_date"],request.form["currency"],float(request.form["rate"])))
+        flash("Kur kaydedildi.")
+        return redirect(url_for("rates"))
+    with db() as c:
+        rows = c.execute("SELECT * FROM rates ORDER BY rate_date DESC,id DESC LIMIT 60").fetchall()
+    return render_template("rates.html", rows=rows, today=date.today().isoformat())
+
+@app.route("/expenses", methods=["GET","POST"])
+@login_required
+@admin_required
+def expenses():
+    if request.method == "POST":
+        currency=request.form["currency"]; d=request.form["expense_date"]; amount=float(request.form["amount"])
+        rate=1.0
+        with db() as c:
+            if currency != "TL":
+                rr=c.execute("SELECT rate FROM rates WHERE rate_date=? AND currency=?",(d,currency)).fetchone()
+                if not rr:
+                    flash("Bu tarih için döviz kuru girilmemiş."); return redirect(url_for("expenses"))
+                rate=float(rr["rate"])
+            c.execute("INSERT INTO expenses(expense_date,description,amount,currency,exchange_rate,total_tl) VALUES(?,?,?,?,?,?)",
+                      (d,request.form["description"],amount,currency,rate,amount*rate))
+        flash("Masraf kaydedildi.")
+        return redirect(url_for("expenses"))
+    with db() as c:
+        rows=c.execute("SELECT * FROM expenses ORDER BY expense_date DESC,id DESC LIMIT 100").fetchall()
+    return render_template("expenses.html", rows=rows, today=date.today().isoformat())
+
+@app.route("/sellers", methods=["GET","POST"])
+@login_required
+@admin_required
+def sellers():
+    if request.method == "POST":
+        with db() as c:
+            c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
+                      (request.form["username"].strip(),generate_password_hash(request.form["password"]),
+                       request.form["full_name"].strip(),"seller",float(request.form["commission"])))
+        flash("Satıcı hesabı oluşturuldu.")
+        return redirect(url_for("sellers"))
+    with db() as c:
+        rows=c.execute("SELECT * FROM users WHERE role='seller' ORDER BY full_name").fetchall()
+    return render_template("sellers.html", rows=rows)
+
+@app.route("/seller/<int:sid>/update", methods=["POST"])
+@login_required
+@admin_required
+def seller_update(sid):
+    with db() as c:
+        c.execute("UPDATE users SET commission=?,active=? WHERE id=? AND role='seller'",
+                  (float(request.form["commission"]),int(request.form.get("active","1")),sid))
+    flash("Satıcı ayarları güncellendi.")
+    return redirect(url_for("sellers"))
+
+@app.route("/payments", methods=["GET","POST"])
+@login_required
+@admin_required
+def payments():
+    if request.method == "POST":
+        with db() as c:
+            c.execute("INSERT INTO payments(seller_id,payment_date,amount,note) VALUES(?,?,?,?)",
+                      (int(request.form["seller_id"]),request.form["payment_date"],float(request.form["amount"]),request.form.get("note","")))
+        flash("Satıcı ödemesi kaydedildi.")
+        return redirect(url_for("payments"))
+    with db() as c:
+        sellers=c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
+        rows=c.execute("SELECT p.*,u.full_name FROM payments p JOIN users u ON u.id=p.seller_id ORDER BY payment_date DESC,p.id DESC").fetchall()
+    return render_template("payments.html", sellers=sellers, rows=rows, today=date.today().isoformat())
+
+@app.route("/reports")
+@login_required
+def reports():
+    start=request.args.get("start",date.today().replace(day=1).isoformat()); end=request.args.get("end",date.today().isoformat())
+    with db() as c:
+        if session["role"]=="admin":
+            rows=c.execute("""SELECT u.id,u.full_name,COALESCE(SUM(s.total_tl),0) sales,
+            COALESCE(SUM(s.commission_tl),0) earned,
+            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
+            FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
+            WHERE u.role='seller' GROUP BY u.id ORDER BY u.full_name""",(start,end,start,end)).fetchall()
+            totals=c.execute("SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions FROM sales WHERE sale_date BETWEEN ? AND ?",(start,end)).fetchone()
+            exp=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
+        else:
+            rows=c.execute("""SELECT u.id,u.full_name,COALESCE(SUM(s.total_tl),0) sales,
+            COALESCE(SUM(s.commission_tl),0) earned,
+            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
+            FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
+            WHERE u.id=? GROUP BY u.id""",(start,end,start,end,session["user_id"])).fetchall()
+            totals=c.execute("SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions FROM sales WHERE sale_date BETWEEN ? AND ? AND seller_id=?",(start,end,session["user_id"])).fetchone()
+            exp=0
+    return render_template("reports.html", rows=rows, totals=totals, expenses=exp, start=start,end=end)
+
+@app.route("/close-period", methods=["POST"])
+@login_required
+@admin_required
+def close_period():
+    start=request.form["start"]; end=request.form["end"]
+    with db() as c:
+        sales=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM sales WHERE sale_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
+        comm=c.execute("SELECT COALESCE(SUM(commission_tl),0) n FROM sales WHERE sale_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
+        exp=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
+        c.execute("INSERT INTO closures(start_date,end_date,closed_at,total_sales,total_commission,total_expenses,shop_net) VALUES(?,?,?,?,?,?,?)",
+                  (start,end,datetime.now().isoformat(timespec="seconds"),sales,comm,exp,sales-comm-exp))
+    flash(f"Hesap kesildi. Dükkân neti: {sales-comm-exp:,.2f} TL")
+    return redirect(url_for("reports",start=start,end=end))
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
