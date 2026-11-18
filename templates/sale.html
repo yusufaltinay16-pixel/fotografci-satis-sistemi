@@ -1,4 +1,9 @@
 {% extends "base.html" %}{% block content %}<section class="panel"><h1>Yeni satış kaydı</h1><form method="post" class="formgrid">
 {% if me['role']=='admin' %}<label>Fotoğrafçı<select name="seller_id" required>{% for s in sellers %}<option value="{{s.id}}">{{s.full_name}}</option>{% endfor %}</select></label>{% endif %}
-<label>Satış tarihi<input type="date" name="sale_date" value="{{today}}" required></label><label>Fotoğraf adedi<input type="number" name="quantity" min="1" required></label><label>Satış tutarı<input type="number" name="amount" min="0.01" step="0.01" required></label>
-<label>Para birimi<select name="currency"><option>TL</option><option>USD</option><option>EUR</option></select></label><label>Ödeme türü<select name="payment_type"><option>Nakit</option><option>Kredi kartı</option><option>IBAN</option></select></label><label class="wide">Not (isteğe bağlı)<input name="note"></label><button class="wide">Satışı kaydet</button></form></section>{% endblock %}
+<label>Satış tarihi<input type="date" name="sale_date" value="{{today}}" required></label>
+<label>Fotoğraf adedi<input type="number" name="quantity" min="1" step="1" required></label>
+<label>Teslim şekli<select name="delivery_type" required><option value="Ücretli baskı">Ücretli baskı (kâğıt)</option><option value="Telefona gönderim">Telefona gönderim (kâğıt yok)</option><option value="Bedelsiz baskı">Bedelsiz baskı / misafir (ücretsiz)</option></select></label>
+<label>Satış tutarı<input type="number" name="amount" min="0" step="0.01" value="0" required><small>Bedelsiz baskıda tutar otomatik sıfır kaydedilir.</small></label>
+<label>Para birimi<select name="currency"><option>TL</option><option>USD</option><option>EUR</option></select></label>
+<label>Ödeme türü<select name="payment_type"><option>Nakit</option><option>Kredi kartı</option><option>IBAN</option></select></label>
+<label class="wide">Not (isteğe bağlı)<input name="note"></label><button class="wide">Satışı kaydet</button></form></section>{% endblock %}
