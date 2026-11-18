@@ -105,6 +105,15 @@ def init_db():
               closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
               total_expenses REAL NOT NULL, shop_net REAL NOT NULL);
             """)
+        if DATABASE_URL:
+            c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
+            c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS paper_count INTEGER NOT NULL DEFAULT 0")
+        else:
+            columns = [row["name"] for row in c.execute("PRAGMA table_info(sales)").fetchall()]
+            if "delivery_type" not in columns:
+                c.execute("ALTER TABLE sales ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
+            if "paper_count" not in columns:
+                c.execute("ALTER TABLE sales ADD COLUMN paper_count INTEGER NOT NULL DEFAULT 0")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
@@ -189,7 +198,13 @@ def dashboard():
             seller_filter = " AND seller_id=?"
             params.append(session["user_id"])
         sales = c.execute(f"SELECT s.*,u.full_name FROM sales s JOIN users u ON u.id=s.seller_id WHERE sale_date BETWEEN ? AND ?{seller_filter} ORDER BY s.id DESC", params).fetchall()
-        totals = c.execute(f"SELECT COALESCE(SUM(total_tl),0) sales, COALESCE(SUM(commission_tl),0) commission, COALESCE(SUM(quantity),0) qty FROM sales WHERE sale_date BETWEEN ? AND ?{seller_filter}", params).fetchone()
+        totals = c.execute(f"""SELECT COALESCE(SUM(total_tl),0) sales, COALESCE(SUM(commission_tl),0) commission,
+          COALESCE(SUM(quantity),0) qty,
+          COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
+          COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
+          COALESCE(SUM(CASE WHEN delivery_type='Telefona gönderim' THEN quantity ELSE 0 END),0) phone_qty,
+          COALESCE(SUM(paper_count),0) paper_count
+          FROM sales WHERE sale_date BETWEEN ? AND ?{seller_filter}""", params).fetchone()
         if session["role"] == "admin":
             expenses = c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?", (start,end)).fetchone()["n"]
             seller_rows = c.execute("""SELECT u.id,u.full_name,u.commission,COALESCE(SUM(s.total_tl),0) sales,
@@ -207,9 +222,17 @@ def sale():
         seller_id = session["user_id"] if session["role"] != "admin" else int(request.form["seller_id"])
         sale_date = request.form.get("sale_date") or date.today().isoformat()
         qty = int(request.form["quantity"])
+        delivery_type = request.form.get("delivery_type", "Ücretli baskı")
+        if delivery_type not in ("Ücretli baskı", "Telefona gönderim", "Bedelsiz baskı") or qty < 1:
+            flash("Fotoğraf adedi veya teslim türü geçersiz.")
+            return redirect(url_for("sale"))
         currency = request.form["currency"]
-        amount = float(request.form["amount"])
-        payment = request.form["payment_type"]
+        amount = 0.0 if delivery_type == "Bedelsiz baskı" else float(request.form.get("amount") or 0)
+        if delivery_type != "Bedelsiz baskı" and amount <= 0:
+            flash("Ücretli baskı veya telefona gönderimde satış tutarı sıfırdan büyük olmalı.")
+            return redirect(url_for("sale"))
+        payment = "Bedelsiz" if delivery_type == "Bedelsiz baskı" else request.form["payment_type"]
+        paper_count = qty if delivery_type in ("Ücretli baskı", "Bedelsiz baskı") else 0
         with db() as c:
             seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
             if not seller: flash("Fotoğrafçı bulunamadı."); return redirect(url_for("sale"))
@@ -224,9 +247,10 @@ def sale():
             total_tl = amount * rate
             commission = total_tl * float(seller["commission"]) / 100
             c.execute("""INSERT INTO sales(seller_id,sale_date,quantity,currency,amount,exchange_rate,total_tl,
-              payment_type,note,commission_rate,commission_tl) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+              payment_type,note,commission_rate,commission_tl,delivery_type,paper_count)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (seller_id,sale_date,qty,currency,amount,rate,total_tl,payment,request.form.get("note",""),
-               seller["commission"],commission))
+               seller["commission"],commission,delivery_type,paper_count))
         flash("Satış kaydedildi.")
         return redirect(url_for("dashboard"))
     with db() as c:
@@ -319,7 +343,12 @@ def reports():
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
             FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
             WHERE u.role='seller' GROUP BY u.id ORDER BY u.full_name""",(start,end,start,end)).fetchall()
-            totals=c.execute("SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions FROM sales WHERE sale_date BETWEEN ? AND ?",(start,end)).fetchone()
+            totals=c.execute("""SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions,
+            COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
+            COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
+            COALESCE(SUM(CASE WHEN delivery_type='Telefona gönderim' THEN quantity ELSE 0 END),0) phone_qty,
+            COALESCE(SUM(paper_count),0) paper_count
+            FROM sales WHERE sale_date BETWEEN ? AND ?""",(start,end)).fetchone()
             exp=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
         else:
             rows=c.execute("""SELECT u.id,u.full_name,COALESCE(SUM(s.total_tl),0) sales,
@@ -327,7 +356,12 @@ def reports():
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
             FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
             WHERE u.id=? GROUP BY u.id""",(start,end,start,end,session["user_id"])).fetchall()
-            totals=c.execute("SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions FROM sales WHERE sale_date BETWEEN ? AND ? AND seller_id=?",(start,end,session["user_id"])).fetchone()
+            totals=c.execute("""SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions,
+            COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
+            COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
+            COALESCE(SUM(CASE WHEN delivery_type='Telefona gönderim' THEN quantity ELSE 0 END),0) phone_qty,
+            COALESCE(SUM(paper_count),0) paper_count
+            FROM sales WHERE sale_date BETWEEN ? AND ? AND seller_id=?""",(start,end,session["user_id"])).fetchone()
             exp=0
     return render_template("reports.html", rows=rows, totals=totals, expenses=exp, start=start,end=end)
 
