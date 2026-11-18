@@ -1,4 +1,5 @@
 import os, sqlite3
+from contextlib import AbstractContextManager
 from datetime import date, datetime
 from functools import wraps
 from flask import Flask, request, redirect, url_for, session, flash, render_template
@@ -6,43 +7,104 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "CHANGE-THIS-SECRET-KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DB_PATH = os.environ.get("DB_PATH", "fotografci.db")
 if DB_PATH.startswith("sqlite:///"):
     DB_PATH = DB_PATH.replace("sqlite:///", "", 1)
-os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+
+class PostgresDB(AbstractContextManager):
+    def __init__(self):
+        import psycopg
+        from psycopg.rows import dict_row
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL ayarlanmamış.")
+        self.conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=15)
+
+    def execute(self, sql, params=()):
+        return self.conn.execute(sql.replace("?", "%s"), params)
+
+    def executescript(self, script):
+        for statement in script.split(";"):
+            if statement.strip():
+                self.conn.execute(statement)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is None:
+                self.conn.commit()
+            else:
+                self.conn.rollback()
+        finally:
+            self.conn.close()
+        return False
 
 def db():
+    if DATABASE_URL:
+        return PostgresDB()
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     c = sqlite3.connect(DB_PATH)
     c.row_factory = sqlite3.Row
     return c
 
 def init_db():
     with db() as c:
-        c.executescript("""
-        CREATE TABLE IF NOT EXISTS users(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
-          password TEXT NOT NULL, full_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'seller',
-          commission REAL NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS rates(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, rate_date TEXT NOT NULL, currency TEXT NOT NULL,
-          rate REAL NOT NULL, UNIQUE(rate_date,currency));
-        CREATE TABLE IF NOT EXISTS sales(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, sale_date TEXT NOT NULL,
-          quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount REAL NOT NULL, exchange_rate REAL NOT NULL,
-          total_tl REAL NOT NULL, payment_type TEXT NOT NULL, note TEXT DEFAULT '',
-          commission_rate REAL NOT NULL, commission_tl REAL NOT NULL,
-          FOREIGN KEY(seller_id) REFERENCES users(id));
-        CREATE TABLE IF NOT EXISTS expenses(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
-          amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS payments(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, payment_date TEXT NOT NULL,
-          amount REAL NOT NULL, note TEXT DEFAULT '', FOREIGN KEY(seller_id) REFERENCES users(id));
-        CREATE TABLE IF NOT EXISTS closures(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-          closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
-          total_expenses REAL NOT NULL, shop_net REAL NOT NULL);
-        """)
+        if DATABASE_URL:
+            c.executescript("""
+            CREATE TABLE IF NOT EXISTS users(
+              id BIGSERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+              password TEXT NOT NULL, full_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'seller',
+              commission DOUBLE PRECISION NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS rates(
+              id BIGSERIAL PRIMARY KEY, rate_date TEXT NOT NULL, currency TEXT NOT NULL,
+              rate DOUBLE PRECISION NOT NULL, UNIQUE(rate_date,currency));
+            CREATE TABLE IF NOT EXISTS sales(
+              id BIGSERIAL PRIMARY KEY, seller_id BIGINT NOT NULL REFERENCES users(id), sale_date TEXT NOT NULL,
+              quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount DOUBLE PRECISION NOT NULL,
+              exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL,
+              payment_type TEXT NOT NULL, note TEXT DEFAULT '',
+              commission_rate DOUBLE PRECISION NOT NULL, commission_tl DOUBLE PRECISION NOT NULL);
+            CREATE TABLE IF NOT EXISTS expenses(
+              id BIGSERIAL PRIMARY KEY, expense_date TEXT NOT NULL, description TEXT NOT NULL,
+              amount DOUBLE PRECISION NOT NULL, currency TEXT NOT NULL,
+              exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL);
+            CREATE TABLE IF NOT EXISTS payments(
+              id BIGSERIAL PRIMARY KEY, seller_id BIGINT NOT NULL REFERENCES users(id), payment_date TEXT NOT NULL,
+              amount DOUBLE PRECISION NOT NULL, note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS closures(
+              id BIGSERIAL PRIMARY KEY, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+              closed_at TEXT NOT NULL, total_sales DOUBLE PRECISION NOT NULL,
+              total_commission DOUBLE PRECISION NOT NULL, total_expenses DOUBLE PRECISION NOT NULL,
+              shop_net DOUBLE PRECISION NOT NULL);
+            """)
+        else:
+            c.executescript("""
+            CREATE TABLE IF NOT EXISTS users(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
+              password TEXT NOT NULL, full_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'seller',
+              commission REAL NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS rates(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, rate_date TEXT NOT NULL, currency TEXT NOT NULL,
+              rate REAL NOT NULL, UNIQUE(rate_date,currency));
+            CREATE TABLE IF NOT EXISTS sales(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, sale_date TEXT NOT NULL,
+              quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount REAL NOT NULL, exchange_rate REAL NOT NULL,
+              total_tl REAL NOT NULL, payment_type TEXT NOT NULL, note TEXT DEFAULT '',
+              commission_rate REAL NOT NULL, commission_tl REAL NOT NULL,
+              FOREIGN KEY(seller_id) REFERENCES users(id));
+            CREATE TABLE IF NOT EXISTS expenses(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
+              amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS payments(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, payment_date TEXT NOT NULL,
+              amount REAL NOT NULL, note TEXT DEFAULT '', FOREIGN KEY(seller_id) REFERENCES users(id));
+            CREATE TABLE IF NOT EXISTS closures(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+              closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
+              total_expenses REAL NOT NULL, shop_net REAL NOT NULL);
+            """)
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
