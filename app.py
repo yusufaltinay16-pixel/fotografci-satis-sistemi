@@ -212,7 +212,7 @@ def sale():
         payment = request.form["payment_type"]
         with db() as c:
             seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
-            if not seller: flash("Satıcı bulunamadı."); return redirect(url_for("sale"))
+            if not seller: flash("Fotoğrafçı bulunamadı."); return redirect(url_for("sale"))
             if currency == "TL":
                 rate = 1.0
             else:
@@ -277,7 +277,7 @@ def sellers():
             c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
                       (request.form["username"].strip(),generate_password_hash(request.form["password"]),
                        request.form["full_name"].strip(),"seller",float(request.form["commission"])))
-        flash("Satıcı hesabı oluşturuldu.")
+        flash("Fotoğrafçı hesabı oluşturuldu.")
         return redirect(url_for("sellers"))
     with db() as c:
         rows=c.execute("SELECT * FROM users WHERE role='seller' ORDER BY full_name").fetchall()
@@ -290,7 +290,7 @@ def seller_update(sid):
     with db() as c:
         c.execute("UPDATE users SET commission=?,active=? WHERE id=? AND role='seller'",
                   (float(request.form["commission"]),int(request.form.get("active","1")),sid))
-    flash("Satıcı ayarları güncellendi.")
+    flash("Fotoğrafçı ayarları güncellendi.")
     return redirect(url_for("sellers"))
 
 @app.route("/payments", methods=["GET","POST"])
@@ -301,7 +301,7 @@ def payments():
         with db() as c:
             c.execute("INSERT INTO payments(seller_id,payment_date,amount,note) VALUES(?,?,?,?)",
                       (int(request.form["seller_id"]),request.form["payment_date"],float(request.form["amount"]),request.form.get("note","")))
-        flash("Satıcı ödemesi kaydedildi.")
+        flash("Fotoğrafçı ödemesi kaydedildi.")
         return redirect(url_for("payments"))
     with db() as c:
         sellers=c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
