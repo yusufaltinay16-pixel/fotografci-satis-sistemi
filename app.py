@@ -78,6 +78,11 @@ def init_db():
               closed_at TEXT NOT NULL, total_sales DOUBLE PRECISION NOT NULL,
               total_commission DOUBLE PRECISION NOT NULL, total_expenses DOUBLE PRECISION NOT NULL,
               shop_net DOUBLE PRECISION NOT NULL);
+            CREATE TABLE IF NOT EXISTS paper_inventory(
+              id INTEGER PRIMARY KEY, current_stock INTEGER NOT NULL DEFAULT 0,
+              low_stock_threshold INTEGER NOT NULL DEFAULT 20);
+            INSERT INTO paper_inventory(id,current_stock,low_stock_threshold)
+              VALUES(1,0,20) ON CONFLICT(id) DO NOTHING;
             """)
         else:
             c.executescript("""
@@ -104,6 +109,10 @@ def init_db():
               id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
               closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
               total_expenses REAL NOT NULL, shop_net REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS paper_inventory(
+              id INTEGER PRIMARY KEY, current_stock INTEGER NOT NULL DEFAULT 0,
+              low_stock_threshold INTEGER NOT NULL DEFAULT 20);
+            INSERT OR IGNORE INTO paper_inventory(id,current_stock,low_stock_threshold) VALUES(1,0,20);
             """)
         if DATABASE_URL:
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
@@ -207,13 +216,14 @@ def dashboard():
           FROM sales WHERE sale_date BETWEEN ? AND ?{seller_filter}""", params).fetchone()
         if session["role"] == "admin":
             expenses = c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?", (start,end)).fetchone()["n"]
+            paper_inventory = c.execute("SELECT * FROM paper_inventory WHERE id=1").fetchone()
             seller_rows = c.execute("""SELECT u.id,u.full_name,u.commission,COALESCE(SUM(s.total_tl),0) sales,
               COALESCE(SUM(s.commission_tl),0) earned FROM users u LEFT JOIN sales s ON s.seller_id=u.id
               AND s.sale_date BETWEEN ? AND ? WHERE u.role='seller' AND u.active=1 GROUP BY u.id ORDER BY u.full_name""",(start,end)).fetchall()
         else:
-            expenses, seller_rows = 0, []
+            expenses, seller_rows, paper_inventory = 0, [], None
     return render_template("dashboard.html", sales=sales, totals=totals, expenses=expenses,
-                           seller_rows=seller_rows, start=start, end=end)
+                           seller_rows=seller_rows, paper_inventory=paper_inventory, start=start, end=end)
 
 @app.route("/sale", methods=["GET","POST"])
 @login_required
@@ -236,6 +246,14 @@ def sale():
         with db() as c:
             seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
             if not seller: flash("Fotoğrafçı bulunamadı."); return redirect(url_for("sale"))
+            if paper_count:
+                stock_update = c.execute(
+                    "UPDATE paper_inventory SET current_stock=current_stock-? WHERE id=1 AND current_stock>=?",
+                    (paper_count, paper_count))
+                if stock_update.rowcount == 0:
+                    current_stock = c.execute("SELECT current_stock FROM paper_inventory WHERE id=1").fetchone()["current_stock"]
+                    flash(f"Yeterli baskı kâğıdı yok. Mevcut stok: {current_stock}. Önce stok ekleyin.")
+                    return redirect(url_for("sale"))
             if currency == "TL":
                 rate = 1.0
             else:
@@ -256,6 +274,30 @@ def sale():
     with db() as c:
         sellers = c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
     return render_template("sale.html", sellers=sellers, today=date.today().isoformat())
+
+@app.route("/paper-stock", methods=["POST"])
+@login_required
+@admin_required
+def paper_stock():
+    action = request.form.get("action")
+    try:
+        quantity = int(request.form.get("quantity", "0"))
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity < 0:
+        flash("Kâğıt adedi negatif olamaz.")
+        return redirect(url_for("dashboard"))
+    with db() as c:
+        if action == "set":
+            c.execute("UPDATE paper_inventory SET current_stock=? WHERE id=1", (quantity,))
+            flash(f"Başlangıç kâğıt stoğu {quantity} olarak kaydedildi.")
+        elif action == "add" and quantity > 0:
+            c.execute("UPDATE paper_inventory SET current_stock=current_stock+? WHERE id=1", (quantity,))
+            flash(f"Stoğa {quantity} kâğıt eklendi.")
+        else:
+            flash("Geçerli bir stok işlemi seçin ve sıfırdan büyük adet girin.")
+    return redirect(url_for("dashboard"))
+
 
 @app.route("/rates", methods=["GET","POST"])
 @login_required
