@@ -1,8 +1,8 @@
 <!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fotoğrafçı İşletme Sistemi</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body><header><div class="brand">Fotoğrafçı İşletme Sistemi</div>
-{% if me %}<div class="user">{{ me['full_name'] }} · {{ 'Yönetici' if me['role']=='admin' else 'Satıcı' }} · <a href="{{ url_for('change_password') }}">Şifre değiştir</a> · <a href="{{ url_for('logout') }}">Çıkış</a></div>{% endif %}</header>
+{% if me %}<div class="user">{{ me['full_name'] }} · {{ 'Yönetici' if me['role']=='admin' else 'Fotoğrafçı' }} · <a href="{{ url_for('change_password') }}">Şifre değiştir</a> · <a href="{{ url_for('logout') }}">Çıkış</a></div>{% endif %}</header>
 {% if me %}<nav><a href="{{ url_for('dashboard') }}">Ana sayfa</a><a href="{{ url_for('sale') }}">Satış gir</a><a href="{{ url_for('reports') }}">Raporlarım</a>
-{% if me['role']=='admin' %}<a href="{{ url_for('sellers') }}">Satıcılar</a><a href="{{ url_for('rates') }}">Döviz kurları</a><a href="{{ url_for('expenses') }}">Masraflar</a><a href="{{ url_for('payments') }}">Satıcı ödemeleri</a>{% endif %}</nav>{% endif %}
+{% if me['role']=='admin' %}<a href="{{ url_for('sellers') }}">Fotoğrafçılar</a><a href="{{ url_for('rates') }}">Döviz kurları</a><a href="{{ url_for('expenses') }}">Masraflar</a><a href="{{ url_for('payments') }}">Fotoğrafçı ödemeleri</a>{% endif %}</nav>{% endif %}
 <main>{% with messages=get_flashed_messages() %}{% if messages %}{% for m in messages %}<div class="flash">{{m}}</div>{% endfor %}{% endif %}{% endwith %}{% block content %}{% endblock %}</main>
 <footer>Fotoğrafçı Satış ve Hakediş Sistemi</footer></body></html>
