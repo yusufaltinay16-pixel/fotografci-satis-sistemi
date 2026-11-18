@@ -226,7 +226,7 @@ def sale():
         if delivery_type not in ("Ücretli baskı", "Telefona gönderim", "Bedelsiz baskı") or qty < 1:
             flash("Fotoğraf adedi veya teslim türü geçersiz.")
             return redirect(url_for("sale"))
-        currency = request.form["currency"]
+        currency = "TL" if delivery_type == "Bedelsiz baskı" else request.form["currency"]
         amount = 0.0 if delivery_type == "Bedelsiz baskı" else float(request.form.get("amount") or 0)
         if delivery_type != "Bedelsiz baskı" and amount <= 0:
             flash("Ücretli baskı veya telefona gönderimde satış tutarı sıfırdan büyük olmalı.")
