@@ -454,7 +454,7 @@ def sale_changes():
         before = read_values(item.get("old_values"))
         after = read_values(item.get("new_values"))
         differences = []
-        if item.get("action") == "delete":
+        if item.get("action") == "Silindi":
             summary = "Satış kaydı silindi"
         else:
             for key in labels:
