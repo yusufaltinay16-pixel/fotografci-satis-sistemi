@@ -408,6 +408,17 @@ def sale_history(sale_id):
                                WHERE sc.sale_id=? ORDER BY sc.id DESC""", (sale_id,)).fetchall()
     return render_template("sale_history.html", changes=changes, sale_id=sale_id)
 
+@app.route("/sale-changes")
+@login_required
+@admin_required
+def sale_changes():
+    with db() as c:
+        rows = c.execute("""SELECT sc.*,u.full_name FROM sale_changes sc
+                            LEFT JOIN users u ON u.id=sc.changed_by
+                            ORDER BY sc.id DESC LIMIT 300""").fetchall()
+    return render_template("sale_changes.html", changes=rows)
+
+
 @app.route("/paper-stock", methods=["POST"])
 @login_required
 @admin_required
