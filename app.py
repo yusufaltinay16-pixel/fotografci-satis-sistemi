@@ -258,14 +258,6 @@ def sale():
         with db() as c:
             seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
             if not seller: flash("Fotoğrafçı bulunamadı."); return redirect(url_for("sale"))
-            if paper_count:
-                stock_update = c.execute(
-                    "UPDATE paper_inventory SET current_stock=current_stock-? WHERE id=1 AND current_stock>=?",
-                    (paper_count, paper_count))
-                if stock_update.rowcount == 0:
-                    current_stock = c.execute("SELECT current_stock FROM paper_inventory WHERE id=1").fetchone()["current_stock"]
-                    flash(f"Yeterli baskı kâğıdı yok. Mevcut stok: {current_stock}. Önce stok ekleyin.")
-                    return redirect(url_for("sale"))
             if currency == "TL":
                 rate = 1.0
             else:
@@ -274,6 +266,14 @@ def sale():
                     flash(f"{sale_date} tarihi için {currency} kuru girilmemiş. Önce yönetici kur girmeli.")
                     return redirect(url_for("sale"))
                 rate = float(rate_row["rate"])
+            if paper_count:
+                stock_update = c.execute(
+                    "UPDATE paper_inventory SET current_stock=current_stock-? WHERE id=1 AND current_stock>=?",
+                    (paper_count, paper_count))
+                if stock_update.rowcount == 0:
+                    current_stock = c.execute("SELECT current_stock FROM paper_inventory WHERE id=1").fetchone()["current_stock"]
+                    flash(f"Yeterli baskı kâğıdı yok. Mevcut stok: {current_stock}. Önce stok ekleyin.")
+                    return redirect(url_for("sale"))
             total_tl = amount * rate
             commission = total_tl * float(seller["commission"]) / 100
             c.execute("""INSERT INTO sales(seller_id,sale_date,quantity,currency,amount,exchange_rate,total_tl,
