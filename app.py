@@ -123,10 +123,14 @@ def init_db():
             INSERT OR IGNORE INTO paper_inventory(id,current_stock,low_stock_threshold) VALUES(1,0,20);
             """)
         if DATABASE_URL:
+            c.execute("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_time TEXT NOT NULL DEFAULT '00:00'")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS paper_count INTEGER NOT NULL DEFAULT 0")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS created_at TEXT")
         else:
+            expense_columns = [row["name"] for row in c.execute("PRAGMA table_info(expenses)").fetchall()]
+            if "expense_time" not in expense_columns:
+                c.execute("ALTER TABLE expenses ADD COLUMN expense_time TEXT NOT NULL DEFAULT '00:00'")
             columns = [row["name"] for row in c.execute("PRAGMA table_info(sales)").fetchall()]
             if "delivery_type" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
@@ -548,6 +552,7 @@ def rates():
 def expenses():
     if request.method == "POST":
         currency=request.form["currency"]; d=request.form["expense_date"]; amount=float(request.form["amount"])
+        expense_time=request.form.get("expense_time") or datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M")
         rate=1.0
         with db() as c:
             if currency != "TL":
@@ -555,13 +560,57 @@ def expenses():
                 if not rr:
                     flash("Bu tarih için döviz kuru girilmemiş."); return redirect(url_for("expenses"))
                 rate=float(rr["rate"])
-            c.execute("INSERT INTO expenses(expense_date,description,amount,currency,exchange_rate,total_tl) VALUES(?,?,?,?,?,?)",
-                      (d,request.form["description"],amount,currency,rate,amount*rate))
+            c.execute("INSERT INTO expenses(expense_date,expense_time,description,amount,currency,exchange_rate,total_tl) VALUES(?,?,?,?,?,?,?)",
+                      (d,expense_time,request.form["description"],amount,currency,rate,amount*rate))
         flash("Masraf kaydedildi.")
         return redirect(url_for("expenses"))
     with db() as c:
-        rows=c.execute("SELECT * FROM expenses ORDER BY expense_date DESC,id DESC LIMIT 100").fetchall()
-    return render_template("expenses.html", rows=rows, today=date.today().isoformat())
+        rows=c.execute("SELECT * FROM expenses ORDER BY expense_date DESC,expense_time DESC,id DESC LIMIT 100").fetchall()
+    return render_template("expenses.html", rows=rows, today=date.today().isoformat(),
+                           now_time=datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M"), edit_expense=None)
+
+@app.route("/expense/<int:expense_id>/edit", methods=["GET","POST"])
+@login_required
+@admin_required
+def edit_expense(expense_id):
+    with db() as c:
+        expense=c.execute("SELECT * FROM expenses WHERE id=?",(expense_id,)).fetchone()
+        if not expense:
+            flash("Masraf kaydı bulunamadı.")
+            return redirect(url_for("expenses"))
+        if request.method == "POST":
+            d=request.form["expense_date"]
+            currency=request.form["currency"]
+            amount=float(request.form["amount"])
+            rate=1.0
+            if currency != "TL":
+                rr=c.execute("SELECT rate FROM rates WHERE rate_date=? AND currency=?",(d,currency)).fetchone()
+                if not rr:
+                    flash("Bu tarih için döviz kuru girilmemiş.")
+                    return redirect(url_for("edit_expense",expense_id=expense_id))
+                rate=float(rr["rate"])
+            c.execute("""UPDATE expenses SET expense_date=?,expense_time=?,description=?,amount=?,
+                         currency=?,exchange_rate=?,total_tl=? WHERE id=?""",
+                      (d,request.form.get("expense_time","00:00"),request.form["description"],
+                       amount,currency,rate,amount*rate,expense_id))
+            flash("Masraf kaydı güncellendi.")
+            return redirect(url_for("expenses"))
+        rows=c.execute("SELECT * FROM expenses ORDER BY expense_date DESC,expense_time DESC,id DESC LIMIT 100").fetchall()
+    return render_template("expenses.html", rows=rows, today=date.today().isoformat(),
+                           now_time=datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M"),
+                           edit_expense=expense)
+    
+@app.route("/expense/<int:expense_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_expense(expense_id):
+    with db() as c:
+        result=c.execute("DELETE FROM expenses WHERE id=?",(expense_id,))
+        if result.rowcount:
+            flash("Masraf kaydı silindi.")
+        else:
+            flash("Masraf kaydı bulunamadı.")
+    return redirect(url_for("expenses"))
 
 @app.route("/sellers", methods=["GET","POST"])
 @login_required
