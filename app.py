@@ -403,9 +403,42 @@ def sale_history(sale_id):
         if not sale_row and session["role"] != "admin":
             flash("Silinmiş satış geçmişini yalnızca yönetici görebilir.")
             return redirect(url_for("dashboard"))
-        changes = c.execute("""SELECT sc.*,u.full_name FROM sale_changes sc
-                               LEFT JOIN users u ON u.id=sc.changed_by
-                               WHERE sc.sale_id=? ORDER BY sc.id DESC""", (sale_id,)).fetchall()
+        rows = c.execute("""SELECT sc.*,u.full_name FROM sale_changes sc
+                            LEFT JOIN users u ON u.id=sc.changed_by
+                            WHERE sc.sale_id=? ORDER BY sc.id DESC""", (sale_id,)).fetchall()
+    labels = {
+        "seller_id": "Fotoğrafçı", "sale_date": "Satış tarihi",
+        "quantity": "Fotoğraf adedi", "delivery_type": "Teslim şekli",
+        "paper_count": "Kullanılan baskı kâğıdı", "currency": "Para birimi",
+        "amount": "Satış tutarı", "payment_type": "Ödeme türü",
+        "note": "Açıklama", "commission_rate": "Fotoğrafçı yüzdesi",
+        "commission_tl": "Fotoğrafçı hakedişi", "total_tl": "TL karşılığı",
+        "exchange_rate": "Döviz kuru",
+    }
+    changes = []
+    for row in rows:
+        item = dict(row)
+        try:
+            before = json.loads(item.get("old_values") or "{}")
+            after = json.loads(item.get("new_values") or "{}")
+        except (TypeError, ValueError):
+            before, after = {}, {}
+        differences = []
+        if item.get("action") == "Silindi":
+            item["summary"] = "Satış kaydı silindi"
+        else:
+            for key, label in labels.items():
+                if before.get(key) != after.get(key):
+                    old_value = before.get(key)
+                    new_value = after.get(key)
+                    differences.append({
+                        "label": label,
+                        "old": "Boş" if old_value is None or old_value == "" else str(old_value),
+                        "new": "Boş" if new_value is None or new_value == "" else str(new_value),
+                    })
+            item["summary"] = "Değişiklik yapılan alan yok" if not differences else ""
+        item["differences"] = differences
+        changes.append(item)
     return render_template("sale_history.html", changes=changes, sale_id=sale_id)
 
 @app.route("/sale-changes")
