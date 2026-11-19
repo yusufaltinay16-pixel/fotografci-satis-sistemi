@@ -412,11 +412,63 @@ def sale_history(sale_id):
 @login_required
 @admin_required
 def sale_changes():
+    labels = {
+        "seller_id": "Fotoğrafçı",
+        "sale_date": "Satış tarihi",
+        "quantity": "Fotoğraf adedi",
+        "delivery_type": "Teslim şekli",
+        "paper_count": "Kullanılan baskı kâğıdı",
+        "currency": "Para birimi",
+        "amount": "Satış tutarı",
+        "payment_type": "Ödeme türü",
+        "note": "Açıklama",
+        "commission_pct": "Fotoğrafçı yüzdesi",
+        "commission_tl": "Fotoğrafçı hakedişi",
+        "total_tl": "TL karşılığı",
+        "exchange_rate": "Döviz kuru",
+    }
+    def read_values(raw):
+        try:
+            value = json.loads(raw or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    def display_value(value):
+        if value is None or value == "":
+            return "Boş"
+        if isinstance(value, bool):
+            return "Evet" if value else "Hayır"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
     with db() as c:
         rows = c.execute("""SELECT sc.*,u.full_name FROM sale_changes sc
                             LEFT JOIN users u ON u.id=sc.changed_by
                             ORDER BY sc.id DESC LIMIT 300""").fetchall()
-    return render_template("sale_changes.html", changes=rows)
+
+    changes = []
+    for row in rows:
+        item = dict(row)
+        before = read_values(item.get("old_values"))
+        after = read_values(item.get("new_values"))
+        differences = []
+        if item.get("action") == "delete":
+            summary = "Satış kaydı silindi"
+        else:
+            for key in labels:
+                if before.get(key) != after.get(key):
+                    differences.append({
+                        "label": labels[key],
+                        "old": display_value(before.get(key)),
+                        "new": display_value(after.get(key)),
+                    })
+            summary = "Değişiklik yapılan alan yok" if not differences else ""
+        item["differences"] = differences
+        item["summary"] = summary
+        changes.append(item)
+    return render_template("sale_changes.html", changes=changes)
 
 
 @app.route("/paper-stock", methods=["POST"])
