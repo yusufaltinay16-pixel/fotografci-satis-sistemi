@@ -1,1 +1,49 @@
-{% extends "base.html" %}{% block content %}<section class="panel"><h1>Fotoğrafçıya ödeme yap</h1><form method="post" class="formgrid"><label>Fotoğrafçı<select name="seller_id">{% for s in sellers %}<option value="{{s.id}}">{{s.full_name}}</option>{% endfor %}</select></label><label>Ödeme tarihi<input type="date" name="payment_date" value="{{today}}" required></label><label>Ödenen tutar (TL)<input type="number" name="amount" step="0.01" min="0.01" required></label><label>Açıklama<input name="note"></label><button>Ödemeyi kaydet</button></form></section><h2>Ödeme geçmişi</h2><div class="tablewrap"><table><tr><th>Tarih</th><th>Fotoğrafçı</th><th>Tutar</th><th>Açıklama</th></tr>{% for r in rows %}<tr><td>{{r.payment_date}}</td><td>{{r.full_name}}</td><td>{{r.amount}} TL</td><td>{{r.note}}</td></tr>{% endfor %}</table></div>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Fotoğrafçıya ödeme yap</h1>
+  <form method="post" class="formgrid" id="paymentForm">
+    <label>Fotoğrafçı
+      <select name="seller_id" id="sellerSelect" required>
+        {% for s in sellers %}
+          <option value="{{s.id}}">{{s.full_name}}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div id="balanceBox" class="panel" style="grid-column:1/-1;margin:0">
+      <strong>Fotoğrafçının alacağı</strong>
+      <p>Toplam hakediş: <strong id="earnedValue">0,00 TL</strong></p>
+      <p>Daha önce ödenen: <strong id="paidValue">0,00 TL</strong></p>
+      <p>Kalan alacak: <strong id="remainingValue">0,00 TL</strong></p>
+    </div>
+    <label>Ödeme tarihi<input type="date" name="payment_date" value="{{today}}" required></label>
+    <label>Ödenen tutar (TL)<input type="number" name="amount" id="paymentAmount" step="0.01" min="0.01" required></label>
+    <label>Açıklama<input name="note"></label>
+    <button>Ödemeyi kaydet</button>
+  </form>
+</section>
+<h2>Ödeme geçmişi</h2>
+<div class="tablewrap">
+  <table>
+    <tr><th>Tarih</th><th>Fotoğrafçı</th><th>Tutar</th><th>Açıklama</th></tr>
+    {% for r in rows %}
+      <tr><td>{{r.payment_date}}</td><td>{{r.full_name}}</td><td>{{"%.2f"|format(r.amount)}} TL</td><td>{{r.note}}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<script>
+  const photographerBalances = {{ balances|tojson }};
+  const sellerSelect = document.getElementById("sellerSelect");
+  const amountInput = document.getElementById("paymentAmount");
+  const money = value => Number(value || 0).toLocaleString("tr-TR", {minimumFractionDigits:2, maximumFractionDigits:2}) + " TL";
+  function updatePhotographerBalance() {
+    const balance = photographerBalances[sellerSelect.value] || {earned:0, paid:0, remaining:0};
+    document.getElementById("earnedValue").textContent = money(balance.earned);
+    document.getElementById("paidValue").textContent = money(balance.paid);
+    document.getElementById("remainingValue").textContent = money(balance.remaining);
+    amountInput.value = balance.remaining > 0 ? balance.remaining.toFixed(2) : "";
+  }
+  sellerSelect.addEventListener("change", updatePhotographerBalance);
+  updatePhotographerBalance();
+</script>
+{% endblock %}
