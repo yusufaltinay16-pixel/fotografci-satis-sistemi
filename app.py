@@ -1,6 +1,7 @@
 import os, sqlite3
 from contextlib import AbstractContextManager
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, request, redirect, url_for, session, flash, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -65,7 +66,8 @@ def init_db():
               quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount DOUBLE PRECISION NOT NULL,
               exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL,
               payment_type TEXT NOT NULL, note TEXT DEFAULT '',
-              commission_rate DOUBLE PRECISION NOT NULL, commission_tl DOUBLE PRECISION NOT NULL);
+              commission_rate DOUBLE PRECISION NOT NULL, commission_tl DOUBLE PRECISION NOT NULL,
+              created_at TEXT);
             CREATE TABLE IF NOT EXISTS expenses(
               id BIGSERIAL PRIMARY KEY, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount DOUBLE PRECISION NOT NULL, currency TEXT NOT NULL,
@@ -97,7 +99,7 @@ def init_db():
               id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, sale_date TEXT NOT NULL,
               quantity INTEGER NOT NULL, currency TEXT NOT NULL, amount REAL NOT NULL, exchange_rate REAL NOT NULL,
               total_tl REAL NOT NULL, payment_type TEXT NOT NULL, note TEXT DEFAULT '',
-              commission_rate REAL NOT NULL, commission_tl REAL NOT NULL,
+              commission_rate REAL NOT NULL, commission_tl REAL NOT NULL, created_at TEXT,
               FOREIGN KEY(seller_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS expenses(
               id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
@@ -117,12 +119,15 @@ def init_db():
         if DATABASE_URL:
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS paper_count INTEGER NOT NULL DEFAULT 0")
+            c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS created_at TEXT")
         else:
             columns = [row["name"] for row in c.execute("PRAGMA table_info(sales)").fetchall()]
             if "delivery_type" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
             if "paper_count" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN paper_count INTEGER NOT NULL DEFAULT 0")
+            if "created_at" not in columns:
+                c.execute("ALTER TABLE sales ADD COLUMN created_at TEXT")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
@@ -231,6 +236,7 @@ def sale():
     if request.method == "POST":
         seller_id = session["user_id"] if session["role"] != "admin" else int(request.form["seller_id"])
         sale_date = request.form.get("sale_date") or date.today().isoformat()
+        created_at = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d %H:%M:%S")
         qty = int(request.form["quantity"])
         delivery_type = request.form.get("delivery_type", "Ücretli baskı")
         if delivery_type not in ("Ücretli baskı", "Telefona gönderim", "Bedelsiz baskı") or qty < 1:
@@ -265,10 +271,10 @@ def sale():
             total_tl = amount * rate
             commission = total_tl * float(seller["commission"]) / 100
             c.execute("""INSERT INTO sales(seller_id,sale_date,quantity,currency,amount,exchange_rate,total_tl,
-              payment_type,note,commission_rate,commission_tl,delivery_type,paper_count)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              payment_type,note,commission_rate,commission_tl,delivery_type,paper_count,created_at)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (seller_id,sale_date,qty,currency,amount,rate,total_tl,payment,request.form.get("note",""),
-               seller["commission"],commission,delivery_type,paper_count))
+               seller["commission"],commission,delivery_type,paper_count,created_at))
         flash("Satış kaydedildi.")
         return redirect(url_for("dashboard"))
     with db() as c:
