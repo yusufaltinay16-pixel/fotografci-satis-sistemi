@@ -22,6 +22,33 @@
     <button>Ödemeyi kaydet</button>
   </form>
 </section>
+
+<section class="panel">
+  <h2>Toplu ödeme</h2>
+  <p>Ödeme yapmak istediğiniz fotoğrafçıları işaretleyin. Her birinin tutarını ayrı ayrı değiştirebilirsiniz.</p>
+  <form method="post" id="batchPaymentForm">
+    <input type="hidden" name="payment_mode" value="batch">
+    <label>Ortak ödeme tarihi
+      <input type="date" name="payment_date" value="{{today}}" required>
+    </label>
+    <div class="tablewrap">
+      <table>
+        <tr><th>Seç</th><th>Fotoğrafçı</th><th>Kalan alacak</th><th>Ödenecek tutar (TL)</th></tr>
+        {% for s in sellers %}
+          {% set balance = balances[s.id|string] %}
+          <tr>
+            <td><input type="checkbox" name="batch_seller_ids" value="{{s.id}}" aria-label="{{s.full_name}} seç"></td>
+            <td>{{s.full_name}}</td>
+            <td>{{"%.2f"|format(balance.remaining)}} TL</td>
+            <td><input type="number" name="amount_{{s.id}}" step="0.01" min="0.01" value="{{'%.2f'|format(balance.remaining) if balance.remaining > 0 else ''}}" placeholder="Tutar"></td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <label>Açıklama (isteğe bağlı)<input name="note" placeholder="Örn. Haftalık toplu ödeme"></label>
+    <button type="submit">Seçilenlerin ödemelerini kaydet</button>
+  </form>
+</section>
 <h2>Ödeme geçmişi</h2>
 <div class="tablewrap">
   <table>
