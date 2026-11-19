@@ -601,7 +601,12 @@ def payments():
     with db() as c:
         sellers=c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
         rows=c.execute("SELECT p.*,u.full_name FROM payments p JOIN users u ON u.id=p.seller_id ORDER BY payment_date DESC,p.id DESC").fetchall()
-    return render_template("payments.html", sellers=sellers, rows=rows, today=date.today().isoformat())
+        balances={}
+        for seller in sellers:
+            earned=c.execute("SELECT COALESCE(SUM(commission_tl),0) AS total FROM sales WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
+            paid=c.execute("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
+            balances[str(seller["id"])]={"earned":float(earned or 0),"paid":float(paid or 0),"remaining":float(earned or 0)-float(paid or 0)}
+    return render_template("payments.html", sellers=sellers, rows=rows, today=date.today().isoformat(), balances=balances)
 
 @app.route("/reports")
 @login_required
