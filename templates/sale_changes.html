@@ -1,1 +1,45 @@
-{% extends "base.html" %}{% block content %}<section class="panel"><h1>Tüm satış değişiklik geçmişi</h1><p>Son 300 değişiklik gösterilir.</p>{% if changes %}<div class="tablewrap"><table><tr><th>İşlem tarihi</th><th>İşlem</th><th>İşlemi yapan</th><th>Satış numarası</th><th>Eski kayıt</th><th>Yeni kayıt</th></tr>{% for c in changes %}<tr><td>{{c.changed_at}}</td><td>{{c.action}}</td><td>{{c.full_name or 'Silinmiş kullanıcı'}}</td><td>{{c.sale_id}}</td><td><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{c.old_values}}</pre></td><td><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{c.new_values}}</pre></td></tr>{% endfor %}</table></div>{% else %}<p>Henüz satış değişikliği yok.</p>{% endif %}<a href="{{url_for('dashboard')}}">Panele dön</a></section>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Satış değişiklik geçmişi</h1>
+  <p>Son 300 işlem gösterilir. Yalnızca değişen bilgiler listelenir.</p>
+  {% if changes %}
+  <div class="tablewrap">
+    <table>
+      <tr>
+        <th>İşlem tarihi</th>
+        <th>İşlem</th>
+        <th>İşlemi yapan</th>
+        <th>Satış no</th>
+        <th>Ne değişti?</th>
+      </tr>
+      {% for c in changes %}
+      <tr>
+        <td>{{c.changed_at}}</td>
+        <td>{% if c.action == 'delete' %}Satış silindi{% else %}Satış düzeltildi{% endif %}</td>
+        <td>{{c.full_name or 'Silinmiş kullanıcı'}}</td>
+        <td>{{c.sale_id}}</td>
+        <td>
+          {% if c.summary %}
+            <strong>{{c.summary}}</strong>
+          {% elif c.differences %}
+            {% for d in c.differences %}
+              <div style="margin-bottom:8px">
+                <strong>{{d.label}}:</strong><br>
+                <span>{{d.old}}</span> <span aria-hidden="true">→</span> <strong>{{d.new}}</strong>
+              </div>
+            {% endfor %}
+          {% else %}
+            Değişiklik bilgisi bulunamadı.
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+    <p>Henüz satış değişikliği yok.</p>
+  {% endif %}
+  <a href="{{url_for('dashboard')}}">Panele dön</a>
+</section>
+{% endblock %}
