@@ -1,4 +1,4 @@
-import os, sqlite3
+import os, sqlite3, json
 from contextlib import AbstractContextManager
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -83,6 +83,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS paper_inventory(
               id INTEGER PRIMARY KEY, current_stock INTEGER NOT NULL DEFAULT 0,
               low_stock_threshold INTEGER NOT NULL DEFAULT 20);
+            CREATE TABLE IF NOT EXISTS sale_changes(
+              id BIGSERIAL PRIMARY KEY, sale_id BIGINT NOT NULL, changed_by BIGINT NOT NULL,
+              action TEXT NOT NULL, changed_at TEXT NOT NULL, old_values TEXT NOT NULL, new_values TEXT NOT NULL);
             INSERT INTO paper_inventory(id,current_stock,low_stock_threshold)
               VALUES(1,0,20) ON CONFLICT(id) DO NOTHING;
             """)
@@ -114,6 +117,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS paper_inventory(
               id INTEGER PRIMARY KEY, current_stock INTEGER NOT NULL DEFAULT 0,
               low_stock_threshold INTEGER NOT NULL DEFAULT 20);
+            CREATE TABLE IF NOT EXISTS sale_changes(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, changed_by INTEGER NOT NULL,
+              action TEXT NOT NULL, changed_at TEXT NOT NULL, old_values TEXT NOT NULL, new_values TEXT NOT NULL);
             INSERT OR IGNORE INTO paper_inventory(id,current_stock,low_stock_threshold) VALUES(1,0,20);
             """)
         if DATABASE_URL:
@@ -280,6 +286,127 @@ def sale():
     with db() as c:
         sellers = c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
     return render_template("sale.html", sellers=sellers, today=date.today().isoformat())
+
+
+@app.route("/sale/<int:sale_id>/edit", methods=["GET","POST"])
+@login_required
+def edit_sale(sale_id):
+    with db() as c:
+        old = c.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if not old:
+            flash("Satış kaydı bulunamadı.")
+            return redirect(url_for("dashboard"))
+        if session["role"] != "admin" and old["seller_id"] != session["user_id"]:
+            flash("Yalnızca kendi satışınızı düzenleyebilirsiniz.")
+            return redirect(url_for("dashboard"))
+        if request.method == "GET":
+            sellers = c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall() if session["role"] == "admin" else []
+            return render_template("sale.html", sellers=sellers, today=date.today().isoformat(),
+                                   sale_record=old, edit_mode=True)
+        try:
+            seller_id = int(request.form["seller_id"]) if session["role"] == "admin" else old["seller_id"]
+            qty = int(request.form["quantity"])
+            sale_date = request.form["sale_date"]
+            delivery_type = request.form["delivery_type"]
+            currency = request.form.get("currency", "TL")
+            amount = float(request.form.get("amount") or 0)
+        except (KeyError, TypeError, ValueError):
+            flash("Satış bilgilerini kontrol edip tekrar deneyin.")
+            return redirect(url_for("edit_sale", sale_id=sale_id))
+        if qty < 1 or delivery_type not in ("Ücretli baskı", "Telefona gönderim", "Bedelsiz baskı"):
+            flash("Fotoğraf adedi veya teslim şekli geçersiz.")
+            return redirect(url_for("edit_sale", sale_id=sale_id))
+        if delivery_type == "Bedelsiz baskı":
+            amount, currency, payment = 0.0, "TL", "Bedelsiz"
+        else:
+            if amount <= 0 or currency not in ("TL", "USD", "EUR"):
+                flash("Ücretli satışta tutar sıfırdan büyük olmalı; para birimini kontrol edin.")
+                return redirect(url_for("edit_sale", sale_id=sale_id))
+            payment = request.form.get("payment_type", "Nakit")
+            if payment not in ("Nakit", "Kredi kartı", "IBAN"):
+                flash("Ödeme türü geçersiz.")
+                return redirect(url_for("edit_sale", sale_id=sale_id))
+        paper_count = qty if delivery_type in ("Ücretli baskı", "Bedelsiz baskı") else 0
+        seller = c.execute("SELECT * FROM users WHERE id=? AND role='seller' AND active=1", (seller_id,)).fetchone()
+        if not seller:
+            flash("Fotoğrafçı bulunamadı veya hesabı kapalı.")
+            return redirect(url_for("edit_sale", sale_id=sale_id))
+        if currency == "TL":
+            rate = 1.0
+        else:
+            rate_row = c.execute("SELECT rate FROM rates WHERE rate_date=? AND currency=?", (sale_date,currency)).fetchone()
+            if not rate_row:
+                flash(f"{sale_date} tarihi için {currency} kuru girilmemiş. Önce yönetici kur girmeli.")
+                return redirect(url_for("edit_sale", sale_id=sale_id))
+            rate = float(rate_row["rate"])
+        total_tl = amount * rate
+        commission_rate = float(seller["commission"])
+        commission_tl = total_tl * commission_rate / 100
+        stock_delta = paper_count - int(old["paper_count"] or 0)
+        if stock_delta > 0:
+            changed = c.execute("UPDATE paper_inventory SET current_stock=current_stock-? WHERE id=1 AND current_stock>=?",
+                                (stock_delta,stock_delta))
+            if changed.rowcount == 0:
+                stock = c.execute("SELECT current_stock FROM paper_inventory WHERE id=1").fetchone()["current_stock"]
+                flash(f"Yeterli kâğıt stoğu yok. Mevcut stok: {stock}.")
+                return redirect(url_for("edit_sale", sale_id=sale_id))
+        elif stock_delta < 0:
+            c.execute("UPDATE paper_inventory SET current_stock=current_stock+? WHERE id=1", (-stock_delta,))
+        changed_at = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d %H:%M:%S")
+        old_values = json.dumps(dict(old), ensure_ascii=False, default=str)
+        c.execute("""UPDATE sales SET seller_id=?,sale_date=?,quantity=?,currency=?,amount=?,exchange_rate=?,
+                     total_tl=?,payment_type=?,note=?,commission_rate=?,commission_tl=?,delivery_type=?,paper_count=?
+                     WHERE id=?""",
+                  (seller_id,sale_date,qty,currency,amount,rate,total_tl,payment,
+                   request.form.get("note",""),commission_rate,commission_tl,delivery_type,paper_count,sale_id))
+        updated = c.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+        c.execute("""INSERT INTO sale_changes(sale_id,changed_by,action,changed_at,old_values,new_values)
+                     VALUES(?,?,?,?,?,?)""",
+                  (sale_id,session["user_id"],"Düzenlendi",changed_at,old_values,
+                   json.dumps(dict(updated), ensure_ascii=False, default=str)))
+    flash("Satış düzeltildi. Hakediş ve kâğıt stoğu güncellendi.")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/sale/<int:sale_id>/delete", methods=["POST"])
+@login_required
+def delete_sale(sale_id):
+    with db() as c:
+        old = c.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if not old:
+            flash("Satış kaydı bulunamadı.")
+            return redirect(url_for("dashboard"))
+        if session["role"] != "admin" and old["seller_id"] != session["user_id"]:
+            flash("Yalnızca kendi satışınızı silebilirsiniz.")
+            return redirect(url_for("dashboard"))
+        paper_count = int(old["paper_count"] or 0)
+        if paper_count:
+            c.execute("UPDATE paper_inventory SET current_stock=current_stock+? WHERE id=1", (paper_count,))
+        changed_at = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("""INSERT INTO sale_changes(sale_id,changed_by,action,changed_at,old_values,new_values)
+                     VALUES(?,?,?,?,?,?)""",
+                  (sale_id,session["user_id"],"Silindi",changed_at,
+                   json.dumps(dict(old), ensure_ascii=False, default=str),"{}"))
+        c.execute("DELETE FROM sales WHERE id=?", (sale_id,))
+    flash("Satış silindi. Kâğıt stoğu otomatik geri eklendi; hakediş toplamı yenilendi.")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/sale/<int:sale_id>/history")
+@login_required
+def sale_history(sale_id):
+    with db() as c:
+        sale_row = c.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if sale_row and session["role"] != "admin" and sale_row["seller_id"] != session["user_id"]:
+            flash("Bu satışın geçmişini görüntüleme yetkiniz yok.")
+            return redirect(url_for("dashboard"))
+        if not sale_row and session["role"] != "admin":
+            flash("Silinmiş satış geçmişini yalnızca yönetici görebilir.")
+            return redirect(url_for("dashboard"))
+        changes = c.execute("""SELECT sc.*,u.full_name FROM sale_changes sc
+                               LEFT JOIN users u ON u.id=sc.changed_by
+                               WHERE sc.sale_id=? ORDER BY sc.id DESC""", (sale_id,)).fetchall()
+    return render_template("sale_history.html", changes=changes, sale_id=sale_id)
 
 @app.route("/paper-stock", methods=["POST"])
 @login_required
