@@ -593,9 +593,50 @@ def seller_update(sid):
 @admin_required
 def payments():
     if request.method == "POST":
+        payment_date = request.form.get("payment_date") or date.today().isoformat()
+        note = request.form.get("note", "").strip()
+        if request.form.get("payment_mode") == "batch":
+            selected_ids = request.form.getlist("batch_seller_ids")
+            if not selected_ids:
+                flash("Toplu ödeme için en az bir fotoğrafçı seçin.")
+                return redirect(url_for("payments"))
+            try:
+                entries = []
+                for raw_id in selected_ids:
+                    seller_id = int(raw_id)
+                    amount = float(request.form.get(f"amount_{seller_id}", "0"))
+                    if amount <= 0:
+                        raise ValueError
+                    entries.append((seller_id, amount))
+            except (TypeError, ValueError):
+                flash("Seçtiğiniz her fotoğrafçı için sıfırdan büyük geçerli bir tutar girin. Hiçbir ödeme kaydedilmedi.")
+                return redirect(url_for("payments"))
+            with db() as c:
+                for seller_id, amount in entries:
+                    seller = c.execute("SELECT id FROM users WHERE id=? AND role='seller' AND active=1", (seller_id,)).fetchone()
+                    if not seller:
+                        flash("Seçilen fotoğrafçılardan biri bulunamadı veya hesabı kapalı. Hiçbir ödeme kaydedilmedi.")
+                        return redirect(url_for("payments"))
+                for seller_id, amount in entries:
+                    c.execute("INSERT INTO payments(seller_id,payment_date,amount,note) VALUES(?,?,?,?)",
+                              (seller_id, payment_date, amount, note))
+            flash(f"{len(entries)} fotoğrafçıya toplu ödeme kaydedildi.")
+            return redirect(url_for("payments"))
+        try:
+            seller_id = int(request.form["seller_id"])
+            amount = float(request.form["amount"])
+            if amount <= 0:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            flash("Fotoğrafçı ve ödeme tutarını kontrol edin.")
+            return redirect(url_for("payments"))
         with db() as c:
+            seller = c.execute("SELECT id FROM users WHERE id=? AND role='seller' AND active=1", (seller_id,)).fetchone()
+            if not seller:
+                flash("Fotoğrafçı bulunamadı veya hesabı kapalı.")
+                return redirect(url_for("payments"))
             c.execute("INSERT INTO payments(seller_id,payment_date,amount,note) VALUES(?,?,?,?)",
-                      (int(request.form["seller_id"]),request.form["payment_date"],float(request.form["amount"]),request.form.get("note","")))
+                      (seller_id,payment_date,amount,note))
         flash("Fotoğrafçı ödemesi kaydedildi.")
         return redirect(url_for("payments"))
     with db() as c:
