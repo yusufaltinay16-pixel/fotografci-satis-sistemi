@@ -752,6 +752,33 @@ def accounting_excel():
     ws.append(["GÜNLÜK MUHASEBE RAPORU"]); ws.append([f"Dönem: {start} - {end}"])
     ws.append(["Tarih","Ciro","Masraf","Masraf Sonrası","Çalışan Hakedişi","Ortaklara Kalan","Ortak Başı"])
     for d in accounting_data_for_excel(start,end): ws.append(d)
+    with db() as conn:
+        expenses_detail=conn.execute("SELECT expense_date,expense_time,description,total_tl FROM expenses WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date,expense_time",(start,end)).fetchall()
+        totals=conn.execute("""SELECT COALESCE(SUM(total_tl),0) revenue,
+          COALESCE(SUM(CASE WHEN payment_type='Nakit' THEN total_tl ELSE 0 END),0) cash,
+          COALESCE(SUM(CASE WHEN payment_type='IBAN' THEN total_tl ELSE 0 END),0) iban,
+          COALESCE(SUM(CASE WHEN payment_type='Kredi kartı' THEN total_tl ELSE 0 END),0) card
+          FROM sales WHERE sale_date BETWEEN ? AND ?""",(start,end)).fetchone()
+        settings=dict(conn.execute("SELECT * FROM accounting_settings WHERE id=1").fetchone())
+        exp_total=float(conn.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
+    expenses_sheet=wb.create_sheet("Masraf Açıklamaları")
+    expenses_sheet.append(["MASRAF AÇIKLAMALARI"]); expenses_sheet.append(["Tarih","Saat","Açıklama","Tutar (TL)"])
+    for e in expenses_detail: expenses_sheet.append([e["expense_date"],e["expense_time"],e["description"],float(e["total_tl"] or 0)])
+    revenue=float(totals["revenue"]); after=revenue-exp_total
+    worker=max(0,after)*float(settings["worker_percent"])/100; profit=after-worker; share=profit/2
+    card=float(totals["card"]); cash_iban=(float(totals["cash"])+float(totals["iban"]))/2
+    deductions=(exp_total+worker)/2
+    p1=cash_iban+(card if settings["card_partner"]==1 else 0)-deductions
+    p2=cash_iban+(card if settings["card_partner"]==2 else 0)-deductions
+    partner_sheet=wb.create_sheet("Ortak Hesapları")
+    partner_sheet.append(["ORTAKLAR HESAPLAŞMA RAPORU"]); partner_sheet.append(["Hesap Kalemi","Tutar (TL)"])
+    for row in [["Toplam ciro",revenue],["Masraflar",exp_total],["Masraf sonrası kalan",after],
+      [f'Çalışan hakedişi (%{settings["worker_percent"]})',worker],["Dağıtılacak kâr",profit],
+      ["Ortak başına hakediş",share],[settings["partner1"]+" hesabına yazılan net",p1],
+      [settings["partner2"]+" hesabına yazılan net",p2],
+      [settings["partner1"]+" alacak (+) / borç (-)",p1-share],
+      [settings["partner2"]+" alacak (+) / borç (-)",p2-share]]:
+        partner_sheet.append(row)
     out=BytesIO()
     for sh in wb.worksheets:
         sh.sheet_properties.pageSetUpPr.fitToPage=True; sh.page_setup.orientation="landscape"; sh.page_setup.paperSize=sh.PAPERSIZE_A4
