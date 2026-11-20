@@ -687,5 +687,100 @@ def close_period():
     flash(f"Hesap kesildi. Dükkân neti: {sales-comm-exp:,.2f} TL")
     return redirect(url_for("reports",start=start,end=end))
 
+
+@app.route("/accounting",methods=["GET","POST"])
+@login_required
+@admin_required
+def accounting():
+    start=request.values.get("start",date.today().replace(day=1).isoformat())
+    end=request.values.get("end",date.today().isoformat())
+    if request.method=="POST":
+        try:
+            p1=request.form.get("partner1","Ortak 1").strip() or "Ortak 1"
+            p2=request.form.get("partner2","Ortak 2").strip() or "Ortak 2"
+            pct=float(request.form.get("worker_percent","0")); card=int(request.form.get("card_partner","1"))
+            if pct<0 or pct>100 or card not in (1,2): raise ValueError()
+            with db() as c:
+                c.execute("UPDATE accounting_settings SET partner1=?,partner2=?,worker_percent=?,card_partner=? WHERE id=1",(p1,p2,pct,card))
+            flash("Muhasebe ayarları kaydedildi.")
+        except (ValueError,TypeError): flash("Yüzde 0 ile 100 arasında olmalı.")
+        return redirect(url_for("accounting",start=start,end=end))
+    with db() as c:
+        settings=dict(c.execute("SELECT * FROM accounting_settings WHERE id=1").fetchone())
+        sales=c.execute("""SELECT COALESCE(SUM(total_tl),0) revenue,
+          COALESCE(SUM(CASE WHEN payment_type='Nakit' THEN total_tl ELSE 0 END),0) cash,
+          COALESCE(SUM(CASE WHEN payment_type='IBAN' THEN total_tl ELSE 0 END),0) iban,
+          COALESCE(SUM(CASE WHEN payment_type='Kredi kartı' THEN total_tl ELSE 0 END),0) card
+          FROM sales WHERE sale_date BETWEEN ? AND ?""",(start,end)).fetchone()
+        expenses=float(c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
+        exp_rows=c.execute("SELECT expense_date,expense_time,description,total_tl FROM expenses WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date,expense_time",(start,end)).fetchall()
+        daily=c.execute("""SELECT sale_date,COALESCE(SUM(total_tl),0) revenue FROM sales WHERE sale_date BETWEEN ? AND ? GROUP BY sale_date""",(start,end)).fetchall()
+        daily_exp=c.execute("""SELECT expense_date,COALESCE(SUM(total_tl),0) total FROM expenses WHERE expense_date BETWEEN ? AND ? GROUP BY expense_date""",(start,end)).fetchall()
+    revenue=float(sales["revenue"]); after=revenue-expenses
+    worker=max(0,after)*float(settings["worker_percent"])/100
+    profit=after-worker; share=profit/2
+    card=float(sales["card"]); cashiban=(float(sales["cash"])+float(sales["iban"]))/2
+    deduction=(expenses+worker)/2
+    p1=cashiban+(card if settings["card_partner"]==1 else 0)-deduction
+    p2=cashiban+(card if settings["card_partner"]==2 else 0)-deduction
+    diff=p1-share
+    debt=(f'{settings["partner2"]}, {settings["partner1"]} ortağına {diff:,.2f} TL borçlu.' if diff>0.005 else
+          f'{settings["partner1"]}, {settings["partner2"]} ortağına {abs(diff):,.2f} TL borçlu.' if diff< -0.005 else "Ortaklar arasında borç/alacak yok.")
+    dm={r["sale_date"]:float(r["revenue"]) for r in daily}; em={r["expense_date"]:float(r["total"]) for r in daily_exp}
+    from datetime import timedelta
+    days=[]; day=date.fromisoformat(start); last=date.fromisoformat(end)
+    while day<=last:
+        key=day.isoformat(); rev=dm.get(key,0); cost=em.get(key,0); net=rev-cost; w=max(0,net)*float(settings["worker_percent"])/100
+        days.append({"date":key,"sales":rev,"expenses":cost,"after":net,"worker":w,"profit":net-w,"share":(net-w)/2})
+        day+=timedelta(days=1)
+    data={"settings":settings,"revenue":revenue,"expenses":expenses,"after":after,"worker":worker,"profit":profit,"share":share,
+          "p1":p1,"p2":p2,"diff1":p1-share,"diff2":p2-share,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
+    return render_template("accounting.html",data=data,start=start,end=end)
+
+
+@app.route("/accounting/excel")
+@login_required
+@admin_required
+def accounting_excel():
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font,PatternFill,Alignment
+    from openpyxl.worksheet.page import PageMargins
+    from openpyxl.utils import get_column_letter
+    start=request.args.get("start",date.today().replace(day=1).isoformat()); end=request.args.get("end",date.today().isoformat())
+    wb=Workbook(); ws=wb.active; ws.title="Günlük Muhasebe"
+    ws.append(["GÜNLÜK MUHASEBE RAPORU"]); ws.append([f"Dönem: {start} - {end}"])
+    ws.append(["Tarih","Ciro","Masraf","Masraf Sonrası","Çalışan Hakedişi","Ortaklara Kalan","Ortak Başı"])
+    for d in accounting_data_for_excel(start,end): ws.append(d)
+    out=BytesIO()
+    for sh in wb.worksheets:
+        sh.sheet_properties.pageSetUpPr.fitToPage=True; sh.page_setup.orientation="landscape"; sh.page_setup.paperSize=sh.PAPERSIZE_A4
+        sh.page_setup.fitToWidth=1; sh.page_setup.fitToHeight=0
+        sh.page_margins=PageMargins(left=.25,right=.25,top=.5,bottom=.5)
+        sh.oddFooter.center.text="Sayfa &P / &N"; sh.sheet_view.showGridLines=False
+        for row in sh.iter_rows():
+            for cell in row:
+                if cell.row<=3: cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="24476B")
+                cell.alignment=Alignment(wrap_text=True)
+        for col in sh.columns: sh.column_dimensions[get_column_letter(col[0].column)].width=18
+    wb.save(out); out.seek(0)
+    return send_file(out,as_attachment=True,download_name=f"Muhasebe_{start}_{end}.xlsx",mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def accounting_data_for_excel(start,end):
+    with db() as c:
+        setting=c.execute("SELECT worker_percent FROM accounting_settings WHERE id=1").fetchone()
+        rev=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM sales WHERE sale_date=?",(start,)).fetchone()["n"]
+        days=[]; from datetime import timedelta
+        day=date.fromisoformat(start); last=date.fromisoformat(end)
+        while day<=last:
+            key=day.isoformat()
+            r=float(c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM sales WHERE sale_date=?",(key,)).fetchone()["n"])
+            e=float(c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date=?",(key,)).fetchone()["n"])
+            after=r-e; w=max(0,after)*float(setting["worker_percent"])/100
+            days.append([key,r,e,after,w,after-w,(after-w)/2]); day+=timedelta(days=1)
+        return days
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
