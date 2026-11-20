@@ -641,121 +641,6 @@ def seller_update(sid):
     flash("Fotoğrafçı ayarları güncellendi.")
     return redirect(url_for("sellers"))
 
-@app.route("/payments", methods=["GET","POST"])
-@login_required
-@admin_required
-def payments():
-    if request.method == "POST":
-        payment_date = request.form.get("payment_date") or date.today().isoformat()
-        payment_time = request.form.get("payment_time") or datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M")
-        note = request.form.get("note", "").strip()
-        if request.form.get("payment_mode") == "batch":
-            selected_ids = request.form.getlist("batch_seller_ids")
-            if not selected_ids:
-                flash("Toplu ödeme için en az bir fotoğrafçı seçin.")
-                return redirect(url_for("payments"))
-            try:
-                entries = []
-                for raw_id in selected_ids:
-                    seller_id = int(raw_id)
-                    amount = float(request.form.get(f"amount_{seller_id}", "0"))
-                    if amount <= 0:
-                        raise ValueError
-                    entries.append((seller_id, amount))
-            except (TypeError, ValueError):
-                flash("Seçtiğiniz her fotoğrafçı için sıfırdan büyük geçerli bir tutar girin. Hiçbir ödeme kaydedilmedi.")
-                return redirect(url_for("payments"))
-            with db() as c:
-                for seller_id, amount in entries:
-                    seller = c.execute("SELECT id FROM users WHERE id=? AND role='seller' AND active=1", (seller_id,)).fetchone()
-                    if not seller:
-                        flash("Seçilen fotoğrafçılardan biri bulunamadı veya hesabı kapalı. Hiçbir ödeme kaydedilmedi.")
-                        return redirect(url_for("payments"))
-                for seller_id, amount in entries:
-                    c.execute("INSERT INTO payments(seller_id,payment_date,payment_time,amount,note) VALUES(?,?,?,?,?)",
-                              (seller_id, payment_date, payment_time, amount, note))
-            flash(f"{len(entries)} fotoğrafçıya toplu ödeme kaydedildi.")
-            return redirect(url_for("payments"))
-        try:
-            seller_id = int(request.form["seller_id"])
-            amount = float(request.form["amount"])
-            if amount <= 0:
-                raise ValueError
-        except (KeyError, TypeError, ValueError):
-            flash("Fotoğrafçı ve ödeme tutarını kontrol edin.")
-            return redirect(url_for("payments"))
-        with db() as c:
-            seller = c.execute("SELECT id FROM users WHERE id=? AND role='seller' AND active=1", (seller_id,)).fetchone()
-            if not seller:
-                flash("Fotoğrafçı bulunamadı veya hesabı kapalı.")
-                return redirect(url_for("payments"))
-            c.execute("INSERT INTO payments(seller_id,payment_date,payment_time,amount,note) VALUES(?,?,?,?,?)",
-                      (seller_id,payment_date,payment_time,amount,note))
-        flash("Fotoğrafçı ödemesi kaydedildi.")
-        return redirect(url_for("payments"))
-    with db() as c:
-        sellers=c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
-        rows=c.execute("SELECT p.*,u.full_name FROM payments p JOIN users u ON u.id=p.seller_id ORDER BY payment_date DESC,payment_time DESC,p.id DESC").fetchall()
-        balances={}
-        for seller in sellers:
-            earned=c.execute("SELECT COALESCE(SUM(commission_tl),0) AS total FROM sales WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
-            paid=c.execute("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
-            balances[str(seller["id"])]={"earned":float(earned or 0),"paid":float(paid or 0),"remaining":float(earned or 0)-float(paid or 0)}
-    return render_template("payments.html", sellers=sellers, rows=rows, today=date.today().isoformat(),
-                           now_time=datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M"),
-                           balances=balances, edit_payment=None)
-
-@app.route("/payment/<int:payment_id>/edit", methods=["GET","POST"])
-@login_required
-@admin_required
-def edit_payment(payment_id):
-    with db() as c:
-        payment=c.execute("SELECT * FROM payments WHERE id=?",(payment_id,)).fetchone()
-        if not payment:
-            flash("Ödeme kaydı bulunamadı.")
-            return redirect(url_for("payments"))
-        if request.method == "POST":
-            try:
-                seller_id=int(request.form["seller_id"])
-                amount=float(request.form["amount"])
-                if amount <= 0:
-                    raise ValueError
-            except (KeyError,TypeError,ValueError):
-                flash("Fotoğrafçı ve ödeme tutarını kontrol edin.")
-                return redirect(url_for("edit_payment",payment_id=payment_id))
-            seller=c.execute("SELECT id FROM users WHERE id=? AND role='seller'",(seller_id,)).fetchone()
-            if not seller:
-                flash("Fotoğrafçı bulunamadı.")
-                return redirect(url_for("edit_payment",payment_id=payment_id))
-            c.execute("""UPDATE payments SET seller_id=?,payment_date=?,payment_time=?,amount=?,note=?
-                         WHERE id=?""",
-                      (seller_id,request.form["payment_date"],request.form.get("payment_time","00:00"),
-                       amount,request.form.get("note","").strip(),payment_id))
-            flash("Ödeme kaydı güncellendi.")
-            return redirect(url_for("payments"))
-        sellers=c.execute("SELECT id,full_name FROM users WHERE role='seller' AND active=1 ORDER BY full_name").fetchall()
-        rows=c.execute("SELECT p.*,u.full_name FROM payments p JOIN users u ON u.id=p.seller_id ORDER BY payment_date DESC,payment_time DESC,p.id DESC").fetchall()
-        balances={}
-        for seller in sellers:
-            earned=c.execute("SELECT COALESCE(SUM(commission_tl),0) AS total FROM sales WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
-            paid=c.execute("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE seller_id=?",(seller["id"],)).fetchone()["total"]
-            balances[str(seller["id"])]={"earned":float(earned or 0),"paid":float(paid or 0),"remaining":float(earned or 0)-float(paid or 0)}
-    return render_template("payments.html", sellers=sellers, rows=rows, today=date.today().isoformat(),
-                           now_time=datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%H:%M"),
-                           balances=balances, edit_payment=payment)
-
-@app.route("/payment/<int:payment_id>/delete", methods=["POST"])
-@login_required
-@admin_required
-def delete_payment(payment_id):
-    with db() as c:
-        result=c.execute("DELETE FROM payments WHERE id=?",(payment_id,))
-        if result.rowcount:
-            flash("Ödeme kaydı silindi; fotoğrafçının kalan alacağı yeniden hesaplandı.")
-        else:
-            flash("Ödeme kaydı bulunamadı.")
-    return redirect(url_for("payments"))
-
 @app.route("/reports")
 @login_required
 def reports():
@@ -763,10 +648,9 @@ def reports():
     with db() as c:
         if session["role"]=="admin":
             rows=c.execute("""SELECT u.id,u.full_name,COALESCE(SUM(s.total_tl),0) sales,
-            COALESCE(SUM(s.commission_tl),0) earned,
-            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
+            COALESCE(SUM(s.commission_tl),0) earned
             FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
-            WHERE u.role='seller' GROUP BY u.id ORDER BY u.full_name""",(start,end,start,end)).fetchall()
+            WHERE u.role='seller' GROUP BY u.id ORDER BY u.full_name""",(start,end)).fetchall()
             totals=c.execute("""SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions,
             COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
             COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
@@ -776,10 +660,9 @@ def reports():
             exp=c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"]
         else:
             rows=c.execute("""SELECT u.id,u.full_name,COALESCE(SUM(s.total_tl),0) sales,
-            COALESCE(SUM(s.commission_tl),0) earned,
-            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.seller_id=u.id AND p.payment_date BETWEEN ? AND ?),0) paid
+            COALESCE(SUM(s.commission_tl),0) earned
             FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
-            WHERE u.id=? GROUP BY u.id""",(start,end,start,end,session["user_id"])).fetchall()
+            WHERE u.id=? GROUP BY u.id""",(start,end,session["user_id"])).fetchall()
             totals=c.execute("""SELECT COALESCE(SUM(total_tl),0) sales,COALESCE(SUM(commission_tl),0) commissions,
             COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
             COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
