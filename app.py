@@ -3,7 +3,7 @@ from contextlib import AbstractContextManager
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from functools import wraps
-from flask import Flask, request, redirect, url_for, session, flash, render_template
+from flask import Flask, request, redirect, url_for, session, flash, render_template, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -72,6 +72,9 @@ def init_db():
               id BIGSERIAL PRIMARY KEY, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount DOUBLE PRECISION NOT NULL, currency TEXT NOT NULL,
               exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL);
+            CREATE TABLE IF NOT EXISTS accounting_settings(
+              id INTEGER PRIMARY KEY, partner1 TEXT NOT NULL DEFAULT 'Ortak 1', partner2 TEXT NOT NULL DEFAULT 'Ortak 2',
+              worker_percent DOUBLE PRECISION NOT NULL DEFAULT 0, card_partner INTEGER NOT NULL DEFAULT 1);
             CREATE TABLE IF NOT EXISTS closures(
               id BIGSERIAL PRIMARY KEY, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
               closed_at TEXT NOT NULL, total_sales DOUBLE PRECISION NOT NULL,
@@ -104,6 +107,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS expenses(
               id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS accounting_settings(
+              id INTEGER PRIMARY KEY, partner1 TEXT NOT NULL DEFAULT 'Ortak 1', partner2 TEXT NOT NULL DEFAULT 'Ortak 2',
+              worker_percent REAL NOT NULL DEFAULT 0, card_partner INTEGER NOT NULL DEFAULT 1);
             CREATE TABLE IF NOT EXISTS closures(
               id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
               closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
@@ -132,6 +138,10 @@ def init_db():
                 c.execute("ALTER TABLE sales ADD COLUMN paper_count INTEGER NOT NULL DEFAULT 0")
             if "created_at" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN created_at TEXT")
+        if DATABASE_URL:
+            c.execute("INSERT INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Ortak 1','Ortak 2',0,1) ON CONFLICT(id) DO NOTHING")
+        else:
+            c.execute("INSERT OR IGNORE INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Ortak 1','Ortak 2',0,1)")
         c.execute("DROP TABLE IF EXISTS payments")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
