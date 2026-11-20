@@ -75,9 +75,6 @@ def init_db():
             CREATE TABLE IF NOT EXISTS purchase_invoices(
               id BIGSERIAL PRIMARY KEY, invoice_date TEXT NOT NULL, supplier TEXT NOT NULL,
               amount DOUBLE PRECISION NOT NULL, description TEXT NOT NULL DEFAULT '');
-            CREATE TABLE IF NOT EXISTS purchase_invoices(
-              id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_date TEXT NOT NULL, supplier TEXT NOT NULL,
-              amount REAL NOT NULL, description TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS accounting_settings(
               id INTEGER PRIMARY KEY, partner1 TEXT NOT NULL DEFAULT 'Ortak 1', partner2 TEXT NOT NULL DEFAULT 'Ortak 2',
               worker_percent DOUBLE PRECISION NOT NULL DEFAULT 0, card_partner INTEGER NOT NULL DEFAULT 1);
@@ -113,6 +110,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS expenses(
               id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS purchase_invoices(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_date TEXT NOT NULL, supplier TEXT NOT NULL,
+              amount REAL NOT NULL, description TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS accounting_settings(
               id INTEGER PRIMARY KEY, partner1 TEXT NOT NULL DEFAULT 'Ortak 1', partner2 TEXT NOT NULL DEFAULT 'Ortak 2',
               worker_percent REAL NOT NULL DEFAULT 0, card_partner INTEGER NOT NULL DEFAULT 1);
