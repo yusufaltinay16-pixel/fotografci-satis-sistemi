@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>{% if edit_invoice %}Alış faturasını güncelle{% else %}Alış faturası kaydet{% endif %}</h1>
+  <p class="muted">Yalnızca alış faturaları kaydedilir. Bu kayıtlar genel masraflara eklenmez; POS vergi hesabında kullanılmak üzere ayrı tutulur.</p>
+  <form method="post" action="{% if edit_invoice %}{{url_for('edit_invoice', invoice_id=edit_invoice.id)}}{% else %}{{url_for('invoices')}}{% endif %}" class="formgrid">
+    <label>Fatura tarihi<input type="date" name="invoice_date" value="{{edit_invoice.invoice_date if edit_invoice else today}}" required></label>
+    <label>Firma adı<input name="supplier" value="{{edit_invoice.supplier if edit_invoice else ''}}" required></label>
+    <label>Fatura tutarı (TL)<input type="number" step="0.01" min="0.01" name="amount" value="{{edit_invoice.amount if edit_invoice else ''}}" required></label>
+    <label>Açıklama<input name="description" value="{{edit_invoice.description if edit_invoice else ''}}"></label>
+    <button>{% if edit_invoice %}Değişiklikleri kaydet{% else %}Alış faturasını kaydet{% endif %}</button>
+    {% if edit_invoice %}<a href="{{url_for('invoices')}}">Vazgeç</a>{% endif %}
+  </form>
+</section>
+<h2>Alış faturası kayıtları</h2>
+<div class="tablewrap"><table>
+<tr><th>Tarih</th><th>Firma</th><th>Açıklama</th><th>Tutar</th><th>İşlem</th></tr>
+{% for r in rows %}
+<tr><td>{{r.invoice_date[8:10]}}.{{r.invoice_date[5:7]}}.{{r.invoice_date[0:4]}}</td><td>{{r.supplier}}</td><td>{{r.description or '-'}}</td><td>{{"%.2f"|format(r.amount)}} TL</td>
+<td><a href="{{url_for('edit_invoice',invoice_id=r.id)}}">Güncelle</a> <form method="post" action="{{url_for('delete_invoice',invoice_id=r.id)}}" style="display:inline" onsubmit="return confirm('Bu alış faturası kaydını silmek istediğinize emin misiniz?')"><button type="submit">Sil</button></form></td></tr>
+{% else %}<tr><td colspan="5">Henüz alış faturası kaydı yok.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
