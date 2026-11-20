@@ -72,9 +72,6 @@ def init_db():
               id BIGSERIAL PRIMARY KEY, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount DOUBLE PRECISION NOT NULL, currency TEXT NOT NULL,
               exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL);
-            CREATE TABLE IF NOT EXISTS payments(
-              id BIGSERIAL PRIMARY KEY, seller_id BIGINT NOT NULL REFERENCES users(id), payment_date TEXT NOT NULL,
-              amount DOUBLE PRECISION NOT NULL, note TEXT DEFAULT '');
             CREATE TABLE IF NOT EXISTS closures(
               id BIGSERIAL PRIMARY KEY, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
               closed_at TEXT NOT NULL, total_sales DOUBLE PRECISION NOT NULL,
@@ -107,9 +104,6 @@ def init_db():
             CREATE TABLE IF NOT EXISTS expenses(
               id INTEGER PRIMARY KEY AUTOINCREMENT, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount REAL NOT NULL, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, total_tl REAL NOT NULL);
-            CREATE TABLE IF NOT EXISTS payments(
-              id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, payment_date TEXT NOT NULL,
-              amount REAL NOT NULL, note TEXT DEFAULT '', FOREIGN KEY(seller_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS closures(
               id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
               closed_at TEXT NOT NULL, total_sales REAL NOT NULL, total_commission REAL NOT NULL,
@@ -124,14 +118,10 @@ def init_db():
             """)
         if DATABASE_URL:
             c.execute("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_time TEXT NOT NULL DEFAULT '00:00'")
-            c.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_time TEXT NOT NULL DEFAULT '00:00'")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'Eski kayıt'")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS paper_count INTEGER NOT NULL DEFAULT 0")
             c.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS created_at TEXT")
         else:
-            payment_columns = [row["name"] for row in c.execute("PRAGMA table_info(payments)").fetchall()]
-            if "payment_time" not in payment_columns:
-                c.execute("ALTER TABLE payments ADD COLUMN payment_time TEXT NOT NULL DEFAULT '00:00'")
             expense_columns = [row["name"] for row in c.execute("PRAGMA table_info(expenses)").fetchall()]
             if "expense_time" not in expense_columns:
                 c.execute("ALTER TABLE expenses ADD COLUMN expense_time TEXT NOT NULL DEFAULT '00:00'")
@@ -142,6 +132,7 @@ def init_db():
                 c.execute("ALTER TABLE sales ADD COLUMN paper_count INTEGER NOT NULL DEFAULT 0")
             if "created_at" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN created_at TEXT")
+        c.execute("DROP TABLE IF EXISTS payments")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
             c.execute("INSERT INTO users(username,password,full_name,role,commission) VALUES(?,?,?,?,?)",
