@@ -72,6 +72,12 @@ def init_db():
               id BIGSERIAL PRIMARY KEY, expense_date TEXT NOT NULL, description TEXT NOT NULL,
               amount DOUBLE PRECISION NOT NULL, currency TEXT NOT NULL,
               exchange_rate DOUBLE PRECISION NOT NULL, total_tl DOUBLE PRECISION NOT NULL);
+            CREATE TABLE IF NOT EXISTS purchase_invoices(
+              id BIGSERIAL PRIMARY KEY, invoice_date TEXT NOT NULL, supplier TEXT NOT NULL,
+              amount DOUBLE PRECISION NOT NULL, description TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS purchase_invoices(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_date TEXT NOT NULL, supplier TEXT NOT NULL,
+              amount REAL NOT NULL, description TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS accounting_settings(
               id INTEGER PRIMARY KEY, partner1 TEXT NOT NULL DEFAULT 'Ortak 1', partner2 TEXT NOT NULL DEFAULT 'Ortak 2',
               worker_percent DOUBLE PRECISION NOT NULL DEFAULT 0, card_partner INTEGER NOT NULL DEFAULT 1);
@@ -616,6 +622,65 @@ def delete_expense(expense_id):
         else:
             flash("Masraf kaydı bulunamadı.")
     return redirect(url_for("expenses"))
+
+
+@app.route("/invoices", methods=["GET","POST"])
+@login_required
+@admin_required
+def invoices():
+    if request.method == "POST":
+        try:
+            invoice_date=request.form["invoice_date"]
+            supplier=request.form["supplier"].strip()
+            amount=float(request.form["amount"])
+            description=request.form.get("description","").strip()
+            if not supplier or amount <= 0:
+                raise ValueError()
+            with db() as c:
+                c.execute("INSERT INTO purchase_invoices(invoice_date,supplier,amount,description) VALUES(?,?,?,?)",
+                          (invoice_date,supplier,amount,description))
+            flash("Alış faturası kaydedildi.")
+        except (KeyError,TypeError,ValueError):
+            flash("Tarih, firma adı ve tutarı kontrol edin.")
+        return redirect(url_for("invoices"))
+    with db() as c:
+        rows=c.execute("SELECT * FROM purchase_invoices ORDER BY invoice_date DESC,id DESC LIMIT 300").fetchall()
+    return render_template("invoices.html",rows=rows,today=date.today().isoformat())
+
+@app.route("/invoice/<int:invoice_id>/edit", methods=["GET","POST"])
+@login_required
+@admin_required
+def edit_invoice(invoice_id):
+    with db() as c:
+        invoice=c.execute("SELECT * FROM purchase_invoices WHERE id=?",(invoice_id,)).fetchone()
+        if not invoice:
+            flash("Alış faturası bulunamadı.")
+            return redirect(url_for("invoices"))
+        if request.method=="POST":
+            try:
+                invoice_date=request.form["invoice_date"]
+                supplier=request.form["supplier"].strip()
+                amount=float(request.form["amount"])
+                description=request.form.get("description","").strip()
+                if not supplier or amount<=0: raise ValueError()
+                c.execute("UPDATE purchase_invoices SET invoice_date=?,supplier=?,amount=?,description=? WHERE id=?",
+                          (invoice_date,supplier,amount,description,invoice_id))
+                flash("Alış faturası güncellendi.")
+                return redirect(url_for("invoices"))
+            except (KeyError,TypeError,ValueError):
+                flash("Tarih, firma adı ve tutarı kontrol edin.")
+    with db() as c:
+        rows=c.execute("SELECT * FROM purchase_invoices ORDER BY invoice_date DESC,id DESC LIMIT 300").fetchall()
+    return render_template("invoices.html",rows=rows,today=date.today().isoformat(),edit_invoice=invoice)
+
+@app.route("/invoice/<int:invoice_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_invoice(invoice_id):
+    with db() as c:
+        result=c.execute("DELETE FROM purchase_invoices WHERE id=?",(invoice_id,))
+    flash("Alış faturası silindi." if result.rowcount else "Alış faturası bulunamadı.")
+    return redirect(url_for("invoices"))
 
 @app.route("/sellers", methods=["GET","POST"])
 @login_required
