@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block content %}
 <h1>Muhasebe</h1>
-<form class="filters" method="get"><label>Başlangıç<input type="date" name="start" value="{{start}}"></label><label>Bitiş<input type="date" name="end" value="{{end}}"></label><button>Raporu göster</button><a href="{{url_for('accounting_excel',start=start,end=end)}}">Excel indir (A4)</a></form>
+<form class="filters" method="get"><label>Başlangıç (Gün.Ay.Yıl)<input type="date" name="start" value="{{start}}"></label><label>Bitiş (Gün.Ay.Yıl)<input type="date" name="end" value="{{end}}"></label><button>Raporu göster</button><a href="{{url_for('accounting_excel',start=start,end=end)}}">Excel indir (A4)</a></form>
 
 <section class="panel"><h2>Muhasebe ayarları</h2><form method="post" class="formgrid">
 <input type="hidden" name="start" value="{{start}}"><input type="hidden" name="end" value="{{end}}">
