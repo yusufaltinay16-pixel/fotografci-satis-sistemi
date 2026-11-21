@@ -803,7 +803,7 @@ def accounting():
         days.append({"date":key,"sales":rev,"expenses":cost,"after":net,"worker":w,"profit":net-w,"share":(net-w)/2})
         day+=timedelta(days=1)
     data={"settings":settings,"revenue":revenue,"expenses":expenses,"after":after,"worker":worker,"profit":profit,"share":share,
-          "p1":p1,"p2":p2,"diff1":p1,"diff2":p2,"card":card,"debtor_name":debtor_name,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
+          "p1":p1,"p2":p2,"diff1":p1,"diff2":p2,"card":card,"debtor_name":debtor_name,"debtor_amount":share,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
     return render_template("accounting.html",data=data,start=start,end=end)
 
 
@@ -844,7 +844,7 @@ def accounting_excel():
     for row in [["toplam ciro",revenue],["masraflar",exp_total],["net ciro",after],
       ["çalışan hak edişi",worker],["net kalan",profit],["/50 si",share],
       [settings["partner1"],p1],[settings["partner2"],p2],
-      ["kredi kartı",card],["KİM borçlu",debtor_name]]:
+      ["kredi kartı",card],[debtor_name,share]]:
         partner_sheet.append(row)
     out=BytesIO()
     for sh in wb.worksheets:
