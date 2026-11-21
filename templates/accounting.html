@@ -25,6 +25,25 @@
 <tr><td><strong>{{data.debtor_name}} BORÇLU</strong></td><td><strong>{{"%.2f"|format(data.debtor_amount)}} TL</strong></td></tr>
 </table></div>
 
+<h2>KREDİ KARTI POS VERGİ HESABI</h2>
+<div class="tablewrap"><table>
+<tr><th>POS VERGİ HESABI</th><th>TUTAR</th></tr>
+<tr><td>Kredi kartı toplam satış</td><td>{{"%.2f"|format(data.pos_tax.card_sales)}} TL</td></tr>
+<tr><td>Alış faturaları toplamı</td><td>{{"%.2f"|format(data.pos_tax.invoices)}} TL</td></tr>
+<tr><td>Vergiye tabi net kalan</td><td>{{"%.2f"|format(data.pos_tax.taxable_net)}} TL</td></tr>
+<tr><td>POS kesintisi (%2)</td><td>{{"%.2f"|format(data.pos_tax.pos_fee)}} TL</td></tr>
+<tr><td>KDV (%9,09)</td><td>{{"%.2f"|format(data.pos_tax.vat)}} TL</td></tr>
+<tr><td>Geçici vergi (%15)</td><td>{{"%.2f"|format(data.pos_tax.temporary_tax)}} TL</td></tr>
+<tr><td><strong>TOPLAM VERGİ</strong></td><td><strong>{{"%.2f"|format(data.pos_tax.total)}} TL</strong></td></tr>
+</table></div>
+<h3>Vergi dağılımı</h3>
+<div class="tablewrap"><table>
+<tr><th>Kişi</th><th>Vergi payı</th></tr>
+<tr><td>Murat (%35)</td><td>{{"%.2f"|format(data.pos_tax.murat)}} TL</td></tr>
+<tr><td>{{data.settings.partner1}} (%32,5)</td><td>{{"%.2f"|format(data.pos_tax.yusuf)}} TL</td></tr>
+<tr><td>{{data.settings.partner2}} (%32,5)</td><td>{{"%.2f"|format(data.pos_tax.muhlis)}} TL</td></tr>
+</table></div>
+
 <h2>Gün gün ciro ve masraf</h2><div class="tablewrap"><table><tr><th>Tarih</th><th>Ciro</th><th>Masraf</th><th>Masraf sonrası</th><th>Çalışan</th><th>Ortak başı</th></tr>
 {% for d in data.days %}<tr><td>{{d.date[8:10]}}.{{d.date[5:7]}}.{{d.date[0:4]}}</td><td>{{"%.2f"|format(d.sales)}} TL</td><td>{{"%.2f"|format(d.expenses)}} TL</td><td>{{"%.2f"|format(d.after)}} TL</td><td>{{"%.2f"|format(d.worker)}} TL</td><td>{{"%.2f"|format(d.share)}} TL</td></tr>{% endfor %}</table></div>
 <h2>Masraf açıklamaları</h2><div class="tablewrap"><table><tr><th>Tarih</th><th>Saat</th><th>Açıklama</th><th>Tutar</th></tr>
