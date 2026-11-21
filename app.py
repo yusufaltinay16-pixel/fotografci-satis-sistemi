@@ -844,7 +844,7 @@ def accounting_excel():
     for row in [["toplam ciro",revenue],["masraflar",exp_total],["net ciro",after],
       ["çalışan hak edişi",worker],["net kalan",profit],["/50 si",share],
       [settings["partner1"],p1],[settings["partner2"],p2],
-      ["kredi kartı",card],[debtor_name,share]]:
+      ["kredi kartı",card],[f"{debtor_name} BORÇLU",share]]:
         partner_sheet.append(row)
     out=BytesIO()
     for sh in wb.worksheets:
