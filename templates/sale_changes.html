@@ -15,7 +15,7 @@
       </tr>
       {% for c in changes %}
       <tr>
-        <td>{{c.changed_at}}</td>
+        <td>{{c.changed_at[8:10]}}.{{c.changed_at[5:7]}}.{{c.changed_at[0:4]}} {{c.changed_at[11:19]}}</td>
         <td>{% if c.action == 'Silindi' %}Satış silindi{% else %}Satış düzeltildi{% endif %}</td>
         <td>{{c.full_name or 'Silinmiş kullanıcı'}}</td>
         <td>{{c.sale_id}}</td>
