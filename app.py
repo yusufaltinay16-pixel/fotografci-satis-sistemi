@@ -148,14 +148,11 @@ def init_db():
             c.execute("INSERT INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Yusuf Altınay','Muhlis Uçan',0,2) ON CONFLICT(id) DO NOTHING")
         else:
             c.execute("INSERT OR IGNORE INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Yusuf Altınay','Muhlis Uçan',0,2)")
-        if DATABASE_URL:
-            c.execute("UPDATE accounting_settings SET partner1='Yusuf Altınay' WHERE id=1 AND partner1='Ortak 1'")
-            c.execute("UPDATE accounting_settings SET partner2='Muhlis Uçan' WHERE id=1 AND partner2='Ortak 2'")
-            c.execute("UPDATE accounting_settings SET card_partner=2 WHERE id=1 AND partner1='Yusuf Altınay' AND partner2='Muhlis Uçan' AND card_partner=1")
-        else:
-            c.execute("UPDATE accounting_settings SET partner1='Yusuf Altınay' WHERE id=1 AND partner1='Ortak 1'")
-            c.execute("UPDATE accounting_settings SET partner2='Muhlis Uçan' WHERE id=1 AND partner2='Ortak 2'")
-            c.execute("UPDATE accounting_settings SET card_partner=2 WHERE id=1 AND partner1='Yusuf Altınay' AND partner2='Muhlis Uçan' AND card_partner=1")
+        c.execute("""UPDATE accounting_settings
+                     SET partner1=CASE WHEN partner1='Ortak 1' THEN 'Yusuf Altınay' ELSE partner1 END,
+                         partner2=CASE WHEN partner2='Ortak 2' THEN 'Muhlis Uçan' ELSE partner2 END,
+                         card_partner=CASE WHEN partner1='Ortak 1' AND partner2='Ortak 2' THEN 2 ELSE card_partner END
+                     WHERE id=1 AND (partner1='Ortak 1' OR partner2='Ortak 2')""")
         c.execute("DROP TABLE IF EXISTS payments")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
