@@ -7,7 +7,7 @@
     {% for c in changes %}
       <div class="panel">
         <strong>{% if c.action == 'Silindi' %}Satış silindi{% else %}Satış düzeltildi{% endif %}</strong>
-        <p>{{c.changed_at}} · İşlemi yapan: {{c.full_name or 'Silinmiş kullanıcı'}}</p>
+        <p>{{c.changed_at[8:10]}}.{{c.changed_at[5:7]}}.{{c.changed_at[0:4]}} {{c.changed_at[11:19]}} · İşlemi yapan: {{c.full_name or 'Silinmiş kullanıcı'}}</p>
         <h3>Ne değişti?</h3>
         {% if c.summary %}
           <p><strong>{{c.summary}}</strong></p>
