@@ -145,9 +145,17 @@ def init_db():
             if "created_at" not in columns:
                 c.execute("ALTER TABLE sales ADD COLUMN created_at TEXT")
         if DATABASE_URL:
-            c.execute("INSERT INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Ortak 1','Ortak 2',0,1) ON CONFLICT(id) DO NOTHING")
+            c.execute("INSERT INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Yusuf Altınay','Muhlis Uçan',0,2) ON CONFLICT(id) DO NOTHING")
         else:
-            c.execute("INSERT OR IGNORE INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Ortak 1','Ortak 2',0,1)")
+            c.execute("INSERT OR IGNORE INTO accounting_settings(id,partner1,partner2,worker_percent,card_partner) VALUES(1,'Yusuf Altınay','Muhlis Uçan',0,2)")
+        if DATABASE_URL:
+            c.execute("UPDATE accounting_settings SET partner1='Yusuf Altınay' WHERE id=1 AND partner1='Ortak 1'")
+            c.execute("UPDATE accounting_settings SET partner2='Muhlis Uçan' WHERE id=1 AND partner2='Ortak 2'")
+            c.execute("UPDATE accounting_settings SET card_partner=2 WHERE id=1 AND partner1='Yusuf Altınay' AND partner2='Muhlis Uçan' AND card_partner=1")
+        else:
+            c.execute("UPDATE accounting_settings SET partner1='Yusuf Altınay' WHERE id=1 AND partner1='Ortak 1'")
+            c.execute("UPDATE accounting_settings SET partner2='Muhlis Uçan' WHERE id=1 AND partner2='Ortak 2'")
+            c.execute("UPDATE accounting_settings SET card_partner=2 WHERE id=1 AND partner1='Yusuf Altınay' AND partner2='Muhlis Uçan' AND card_partner=1")
         c.execute("DROP TABLE IF EXISTS payments")
         admin = c.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()
         if not admin:
@@ -784,13 +792,12 @@ def accounting():
     revenue=float(sales["revenue"]); after=revenue-expenses
     worker=max(0,after)*float(settings["worker_percent"])/100
     profit=after-worker; share=profit/2
-    card=float(sales["card"]); cashiban=(float(sales["cash"])+float(sales["iban"]))/2
-    deduction=(expenses+worker)/2
-    p1=cashiban+(card if settings["card_partner"]==1 else 0)-deduction
-    p2=cashiban+(card if settings["card_partner"]==2 else 0)-deduction
-    diff=p1-share
-    debt=(f'{settings["partner2"]}, {settings["partner1"]} ortağına {diff:,.2f} TL borçlu.' if diff>0.005 else
-          f'{settings["partner1"]}, {settings["partner2"]} ortağına {abs(diff):,.2f} TL borçlu.' if diff< -0.005 else "Ortaklar arasında borç/alacak yok.")
+    card=float(sales["card"])
+    # Kullanıcının istediği hesap özeti: kartın yazıldığı ortak +, diğer ortak - görünür.
+    p1=share if settings["card_partner"]==1 else -share
+    p2=share if settings["card_partner"]==2 else -share
+    debtor_name=settings["partner1"] if settings["card_partner"]==1 else settings["partner2"]
+    debt=debtor_name
     dm={r["sale_date"]:float(r["revenue"]) for r in daily}; em={r["expense_date"]:float(r["total"]) for r in daily_exp}
     from datetime import timedelta
     days=[]; day=date.fromisoformat(start); last=date.fromisoformat(end)
@@ -799,7 +806,7 @@ def accounting():
         days.append({"date":key,"sales":rev,"expenses":cost,"after":net,"worker":w,"profit":net-w,"share":(net-w)/2})
         day+=timedelta(days=1)
     data={"settings":settings,"revenue":revenue,"expenses":expenses,"after":after,"worker":worker,"profit":profit,"share":share,
-          "p1":p1,"p2":p2,"diff1":p1-share,"diff2":p2-share,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
+          "p1":p1,"p2":p2,"diff1":p1,"diff2":p2,"card":card,"debtor_name":debtor_name,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
     return render_template("accounting.html",data=data,start=start,end=end)
 
 
@@ -831,18 +838,16 @@ def accounting_excel():
     for e in expenses_detail: expenses_sheet.append([e["expense_date"],e["expense_time"],e["description"],float(e["total_tl"] or 0)])
     revenue=float(totals["revenue"]); after=revenue-exp_total
     worker=max(0,after)*float(settings["worker_percent"])/100; profit=after-worker; share=profit/2
-    card=float(totals["card"]); cash_iban=(float(totals["cash"])+float(totals["iban"]))/2
-    deductions=(exp_total+worker)/2
-    p1=cash_iban+(card if settings["card_partner"]==1 else 0)-deductions
-    p2=cash_iban+(card if settings["card_partner"]==2 else 0)-deductions
+    card=float(totals["card"])
+    p1=share if settings["card_partner"]==1 else -share
+    p2=share if settings["card_partner"]==2 else -share
+    debtor_name=settings["partner1"] if settings["card_partner"]==1 else settings["partner2"]
     partner_sheet=wb.create_sheet("Ortak Hesapları")
-    partner_sheet.append(["ORTAKLAR HESAPLAŞMA RAPORU"]); partner_sheet.append(["Hesap Kalemi","Tutar (TL)"])
-    for row in [["Toplam ciro",revenue],["Masraflar",exp_total],["Masraf sonrası kalan",after],
-      [f'Çalışan hakedişi (%{settings["worker_percent"]})',worker],["Dağıtılacak kâr",profit],
-      ["Ortak başına hakediş",share],[settings["partner1"]+" hesabına yazılan net",p1],
-      [settings["partner2"]+" hesabına yazılan net",p2],
-      [settings["partner1"]+" alacak (+) / borç (-)",p1-share],
-      [settings["partner2"]+" alacak (+) / borç (-)",p2-share]]:
+    partner_sheet.append(["HESAP ÖZETİ"])
+    for row in [["toplam ciro",revenue],["masraflar",exp_total],["net ciro",after],
+      ["çalışan hak edişi",worker],["net kalan",profit],["/50 si",share],
+      [settings["partner1"],p1],[settings["partner2"],p2],
+      ["kredi kartı",card],["KİM borçlu",debtor_name]]:
         partner_sheet.append(row)
     out=BytesIO()
     for sh in wb.worksheets:
