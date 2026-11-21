@@ -844,6 +844,10 @@ def accounting_excel():
         settings=dict(conn.execute("SELECT * FROM accounting_settings WHERE id=1").fetchone())
         exp_total=float(conn.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
         invoice_total=float(conn.execute("SELECT COALESCE(SUM(amount),0) n FROM purchase_invoices WHERE invoice_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
+        photographer_rows=conn.execute("""SELECT u.full_name,COALESCE(SUM(s.total_tl),0) sales,
+            COALESCE(SUM(s.commission_tl),0) earned
+            FROM users u LEFT JOIN sales s ON s.seller_id=u.id AND s.sale_date BETWEEN ? AND ?
+            WHERE u.role='seller' GROUP BY u.id ORDER BY u.full_name""",(start,end)).fetchall()
     expenses_sheet=wb.create_sheet("Masraf Açıklamaları")
     expenses_sheet.append(["MASRAF AÇIKLAMALARI"]); expenses_sheet.append(["Tarih","Saat","Açıklama","Tutar (TL)"])
     for e in expenses_detail: expenses_sheet.append([date.fromisoformat(e["expense_date"]).strftime("%d.%m.%Y"),e["expense_time"],e["description"],float(e["total_tl"] or 0)])
@@ -882,6 +886,86 @@ def accounting_excel():
         ["Muhlis (%32,5)",total_tax*0.325],
     ]:
         tax_sheet.append(row)
+    # Tek sayfalık A4 çıktı özeti: diğer sayfalardaki temel toplamları bir araya getirir.
+    output=wb.create_sheet("ÇIKTI SAYFASI",0)
+    output.sheet_view.showGridLines=False
+    output.merge_cells("A1:F1")
+    output["A1"]="FOTOĞRAFÇI SATIŞ SİSTEMİ - GENEL HESAP ÖZETİ"
+    output["A1"].font=Font(bold=True,size=16,color="FFFFFF")
+    output["A1"].fill=PatternFill("solid",fgColor="17365D")
+    output["A1"].alignment=Alignment(horizontal="center",vertical="center")
+    output.row_dimensions[1].height=30
+    output.merge_cells("A2:F2")
+    output["A2"]=f"Rapor Dönemi: {date.fromisoformat(start).strftime('%d.%m.%Y')} - {date.fromisoformat(end).strftime('%d.%m.%Y')}"
+    output["A2"].font=Font(bold=True,size=11,color="17365D")
+    output["A2"].alignment=Alignment(horizontal="center")
+    def out_section(row,title):
+        output.merge_cells(start_row=row,start_column=1,end_row=row,end_column=3)
+        c=output.cell(row,1,title); c.font=Font(bold=True,color="FFFFFF")
+        c.fill=PatternFill("solid",fgColor="24476B")
+        c.alignment=Alignment(horizontal="left")
+    def out_pair(row,label,value,col=1):
+        output.cell(row,col,label).font=Font(bold=True)
+        output.cell(row,col+1,value).number_format='#,##0.00 "TL"'
+    output.column_dimensions["A"].width=25
+    output.column_dimensions["B"].width=17
+    output.column_dimensions["C"].width=24
+    output.column_dimensions["D"].width=17
+    output.column_dimensions["E"].width=22
+    output.column_dimensions["F"].width=17
+    out_section(4,"GENEL HESAP ÖZETİ")
+    out_pair(5,"Toplam ciro",revenue); out_pair(6,"Masraflar",exp_total)
+    out_pair(7,"Net ciro",after); out_pair(8,"Çalışan hakedişi",worker)
+    out_pair(9,"Net kalan",profit); out_pair(10,"Kişi başı (/2)",share)
+    out_pair(5,"Nakit satış",float(totals["cash"]),3)
+    out_pair(6,"Kredi kartı",card,3); out_pair(7,"IBAN satış",float(totals["iban"]),3)
+    out_section(12,"ORTAK HESAPLARI")
+    output.cell(13,1,settings["partner1"]); output.cell(13,2,p1).number_format='#,##0.00 "TL"'
+    output.cell(14,1,settings["partner2"]); output.cell(14,2,p2).number_format='#,##0.00 "TL"'
+    output.cell(15,1,f"{debtor_name} BORÇLU"); output.cell(15,2,share).number_format='#,##0.00 "TL"'
+    out_section(12,"FOTOĞRAFÇI HAKEDİŞLERİ")
+    output.cell(13,4,"Fotoğrafçı").font=Font(bold=True)
+    output.cell(13,5,"Satış (TL)").font=Font(bold=True)
+    output.cell(13,6,"Hakediş (TL)").font=Font(bold=True)
+    rr=14
+    for person in photographer_rows:
+        output.cell(rr,4,person["full_name"])
+        output.cell(rr,5,float(person["sales"] or 0)).number_format='#,##0.00'
+        output.cell(rr,6,float(person["earned"] or 0)).number_format='#,##0.00'
+        rr+=1
+    out_section(17,"POS VERGİ ÖZETİ")
+    tax_rows=[
+        ("Alış faturaları",invoice_total),("Vergiye tabi net",taxable_net),
+        ("POS kesintisi (%2)",pos_fee),("KDV (%9,09)",vat_amount),
+        ("Geçici vergi (%15)",temporary_tax),("TOPLAM POS VERGİSİ",total_tax),
+        ("Murat (%35)",total_tax*0.35),("Yusuf (%32,5)",total_tax*0.325),
+        ("Muhlis (%32,5)",total_tax*0.325)]
+    for i,(label,value) in enumerate(tax_rows,18):
+        output.cell(i,1,label).font=Font(bold=(label=="TOPLAM POS VERGİSİ"))
+        output.cell(i,2,value).number_format='#,##0.00 "TL"'
+    out_section(17,"MASRAF BİLGİSİ")
+    output.cell(18,4,"Dönem masraf toplamı").font=Font(bold=True)
+    output.cell(18,5,exp_total).number_format='#,##0.00 "TL"'
+    output.cell(19,4,"Alış faturası toplamı").font=Font(bold=True)
+    output.cell(19,5,invoice_total).number_format='#,##0.00 "TL"'
+    # Bütün özet alanlarını okunaklı, kenarlıklı ve tek A4 yatay sayfaya sığdır.
+    from openpyxl.styles import Border,Side
+    thin=Side(style="thin",color="A6A6A6")
+    for row in output.iter_rows(min_row=1,max_row=max(26,rr),min_col=1,max_col=6):
+        for cell in row:
+            cell.border=Border(left=thin,right=thin,top=thin,bottom=thin)
+            cell.alignment=Alignment(vertical="center",wrap_text=True)
+            if cell.value is not None and cell.row not in (1,2):
+                cell.font=Font(name="Arial",size=9,bold=cell.font.bold,color=cell.font.color)
+    output.freeze_panes="A4"
+    output.print_area=f"A1:F{max(26,rr)}"
+    output.sheet_properties.pageSetUpPr.fitToPage=True
+    output.page_setup.orientation="landscape"
+    output.page_setup.paperSize=output.PAPERSIZE_A4
+    output.page_setup.fitToWidth=1
+    output.page_setup.fitToHeight=1
+    output.page_margins=PageMargins(left=.25,right=.25,top=.35,bottom=.35,header=.15,footer=.15)
+    output.oddFooter.center.text="Sayfa &P / &N"
     out=BytesIO()
     for sh in wb.worksheets:
         sh.sheet_properties.pageSetUpPr.fitToPage=True; sh.page_setup.orientation="landscape"; sh.page_setup.paperSize=sh.PAPERSIZE_A4
