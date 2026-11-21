@@ -899,9 +899,9 @@ def accounting_excel():
     output["A2"]=f"Rapor Dönemi: {date.fromisoformat(start).strftime('%d.%m.%Y')} - {date.fromisoformat(end).strftime('%d.%m.%Y')}"
     output["A2"].font=Font(bold=True,size=11,color="17365D")
     output["A2"].alignment=Alignment(horizontal="center")
-    def out_section(row,title):
-        output.merge_cells(start_row=row,start_column=1,end_row=row,end_column=3)
-        c=output.cell(row,1,title); c.font=Font(bold=True,color="FFFFFF")
+    def out_section(row,title,col=1):
+        output.merge_cells(start_row=row,start_column=col,end_row=row,end_column=col+2)
+        c=output.cell(row,col,title); c.font=Font(bold=True,color="FFFFFF")
         c.fill=PatternFill("solid",fgColor="24476B")
         c.alignment=Alignment(horizontal="left")
     def out_pair(row,label,value,col=1):
@@ -923,7 +923,7 @@ def accounting_excel():
     output.cell(13,1,settings["partner1"]); output.cell(13,2,p1).number_format='#,##0.00 "TL"'
     output.cell(14,1,settings["partner2"]); output.cell(14,2,p2).number_format='#,##0.00 "TL"'
     output.cell(15,1,f"{debtor_name} BORÇLU"); output.cell(15,2,share).number_format='#,##0.00 "TL"'
-    out_section(12,"FOTOĞRAFÇI HAKEDİŞLERİ")
+    out_section(12,"FOTOĞRAFÇI HAKEDİŞLERİ",4)
     output.cell(13,4,"Fotoğrafçı").font=Font(bold=True)
     output.cell(13,5,"Satış (TL)").font=Font(bold=True)
     output.cell(13,6,"Hakediş (TL)").font=Font(bold=True)
@@ -943,7 +943,7 @@ def accounting_excel():
     for i,(label,value) in enumerate(tax_rows,18):
         output.cell(i,1,label).font=Font(bold=(label=="TOPLAM POS VERGİSİ"))
         output.cell(i,2,value).number_format='#,##0.00 "TL"'
-    out_section(17,"MASRAF BİLGİSİ")
+    out_section(17,"MASRAF BİLGİSİ",4)
     output.cell(18,4,"Dönem masraf toplamı").font=Font(bold=True)
     output.cell(18,5,exp_total).number_format='#,##0.00 "TL"'
     output.cell(19,4,"Alış faturası toplamı").font=Font(bold=True)
