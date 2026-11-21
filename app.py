@@ -831,9 +831,9 @@ def accounting_excel():
     from openpyxl.utils import get_column_letter
     start=request.args.get("start",date.today().replace(day=1).isoformat()); end=request.args.get("end",date.today().isoformat())
     wb=Workbook(); ws=wb.active; ws.title="Günlük Muhasebe"
-    ws.append(["GÜNLÜK MUHASEBE RAPORU"]); ws.append([f"Dönem: {start} - {end}"])
+    ws.append(["GÜNLÜK MUHASEBE RAPORU"]); ws.append([f"Dönem: {date.fromisoformat(start).strftime('%d.%m.%Y')} - {date.fromisoformat(end).strftime('%d.%m.%Y')}"])
     ws.append(["Tarih","Ciro","Masraf","Masraf Sonrası","Çalışan Hakedişi","Ortaklara Kalan","Ortak Başı"])
-    for d in accounting_data_for_excel(start,end): ws.append(d)
+    for d in accounting_data_for_excel(start,end): ws.append([date.fromisoformat(d[0]).strftime("%d.%m.%Y"), *d[1:]])
     with db() as conn:
         expenses_detail=conn.execute("SELECT expense_date,expense_time,description,total_tl FROM expenses WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date,expense_time",(start,end)).fetchall()
         totals=conn.execute("""SELECT COALESCE(SUM(total_tl),0) revenue,
@@ -846,7 +846,7 @@ def accounting_excel():
         invoice_total=float(conn.execute("SELECT COALESCE(SUM(amount),0) n FROM purchase_invoices WHERE invoice_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
     expenses_sheet=wb.create_sheet("Masraf Açıklamaları")
     expenses_sheet.append(["MASRAF AÇIKLAMALARI"]); expenses_sheet.append(["Tarih","Saat","Açıklama","Tutar (TL)"])
-    for e in expenses_detail: expenses_sheet.append([e["expense_date"],e["expense_time"],e["description"],float(e["total_tl"] or 0)])
+    for e in expenses_detail: expenses_sheet.append([date.fromisoformat(e["expense_date"]).strftime("%d.%m.%Y"),e["expense_time"],e["description"],float(e["total_tl"] or 0)])
     revenue=float(totals["revenue"]); after=revenue-exp_total
     worker=max(0,after)*float(settings["worker_percent"])/100; profit=after-worker; share=profit/2
     card=float(totals["card"])
@@ -868,7 +868,7 @@ def accounting_excel():
     total_tax=pos_fee+vat_amount+temporary_tax
     tax_sheet=wb.create_sheet("POS VERGİLER")
     tax_sheet.append(["POS VERGİ HESABI"])
-    tax_sheet.append([f"Dönem: {start} - {end}"])
+    tax_sheet.append([f"Dönem: {date.fromisoformat(start).strftime('%d.%m.%Y')} - {date.fromisoformat(end).strftime('%d.%m.%Y')}"])
     for row in [
         ["Kredi kartı toplam satış",card],
         ["Alış faturaları toplamı",invoice_total],
