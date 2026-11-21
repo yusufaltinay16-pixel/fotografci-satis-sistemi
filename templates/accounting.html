@@ -1,23 +1,30 @@
 {% extends "base.html" %}{% block content %}
 <h1>Muhasebe</h1>
 <form class="filters" method="get"><label>Başlangıç<input type="date" name="start" value="{{start}}"></label><label>Bitiş<input type="date" name="end" value="{{end}}"></label><button>Raporu göster</button><a href="{{url_for('accounting_excel',start=start,end=end)}}">Excel indir (A4)</a></form>
+
 <section class="panel"><h2>Muhasebe ayarları</h2><form method="post" class="formgrid">
 <input type="hidden" name="start" value="{{start}}"><input type="hidden" name="end" value="{{end}}">
 <label>1. ortak adı<input name="partner1" value="{{data.settings.partner1}}" required></label>
 <label>2. ortak adı<input name="partner2" value="{{data.settings.partner2}}" required></label>
-<label>Çalışan hakediş yüzdesi (%)<input type="number" name="worker_percent" min="0" max="100" step="0.01" value="{{data.settings.worker_percent}}" required></label>
-<label>Kredi kartı hangi ortağın hesabına yazılsın?<select name="card_partner"><option value="1" {% if data.settings.card_partner==1 %}selected{% endif %}>{{data.settings.partner1}}</option><option value="2" {% if data.settings.card_partner==2 %}selected{% endif %}>{{data.settings.partner2}}</option></select></label>
+<label>Çalışan hak ediş yüzdesi (%)<input type="number" name="worker_percent" min="0" max="100" step="0.01" value="{{data.settings.worker_percent}}" required></label>
+<label>Kredi kartı kime yazılsın?<select name="card_partner"><option value="1" {% if data.settings.card_partner==1 %}selected{% endif %}>{{data.settings.partner1}}</option><option value="2" {% if data.settings.card_partner==2 %}selected{% endif %}>{{data.settings.partner2}}</option></select></label>
 <button class="wide">Ayarları kaydet</button></form></section>
-<h2>Genel hesap</h2><div class="cards">
-<div class="card"><small>Toplam ciro</small><strong>{{"%.2f"|format(data.revenue)}} TL</strong></div>
-<div class="card"><small>Masraflar</small><strong>{{"%.2f"|format(data.expenses)}} TL</strong></div>
-<div class="card"><small>Masraf sonrası kalan</small><strong>{{"%.2f"|format(data.after)}} TL</strong></div>
-<div class="card"><small>Çalışan hakedişi</small><strong>{{"%.2f"|format(data.worker)}} TL</strong></div>
-<div class="card"><small>Ortaklara kalan</small><strong>{{"%.2f"|format(data.profit)}} TL</strong></div>
-<div class="card"><small>Ortak başına</small><strong>{{"%.2f"|format(data.share)}} TL</strong></div></div>
-<h2>Ortakların borç / alacak hesabı</h2><div class="tablewrap"><table><tr><th>Ortak</th><th>Hakediş</th><th>Hesabına yazılan net</th><th>Fark (+ alacak / - borç)</th></tr>
-<tr><td>{{data.settings.partner1}}</td><td>{{"%.2f"|format(data.share)}} TL</td><td>{{"%.2f"|format(data.p1)}} TL</td><td>{{"%.2f"|format(data.diff1)}} TL</td></tr>
-<tr><td>{{data.settings.partner2}}</td><td>{{"%.2f"|format(data.share)}} TL</td><td>{{"%.2f"|format(data.p2)}} TL</td><td>{{"%.2f"|format(data.diff2)}} TL</td></tr></table></div><p><strong>{{data.debt}}</strong></p>
+
+<h2>HESAP ÖZETİ</h2>
+<div class="tablewrap"><table>
+<tr><th>HESAP ÖZETİ</th><th></th></tr>
+<tr><td>toplam ciro</td><td>{{"%.2f"|format(data.revenue)}} TL</td></tr>
+<tr><td>masraflar</td><td>{{"%.2f"|format(data.expenses)}} TL</td></tr>
+<tr><td>net ciro</td><td>{{"%.2f"|format(data.after)}} TL</td></tr>
+<tr><td>çalışan hak edişi</td><td>{{"%.2f"|format(data.worker)}} TL</td></tr>
+<tr><td>net kalan</td><td>{{"%.2f"|format(data.profit)}} TL</td></tr>
+<tr><td>/50 si</td><td>{{"%.2f"|format(data.share)}} TL</td></tr>
+<tr><td>{{data.settings.partner1}}</td><td>{{"%.2f"|format(data.p1)}} TL</td></tr>
+<tr><td>{{data.settings.partner2}}</td><td>{{"%.2f"|format(data.p2)}} TL</td></tr>
+<tr><td>kredi kartı</td><td>{{"%.2f"|format(data.card)}} TL</td></tr>
+<tr><td><strong>KİM borçlu</strong></td><td><strong>{{data.debtor_name}}</strong></td></tr>
+</table></div>
+
 <h2>Gün gün ciro ve masraf</h2><div class="tablewrap"><table><tr><th>Tarih</th><th>Ciro</th><th>Masraf</th><th>Masraf sonrası</th><th>Çalışan</th><th>Ortak başı</th></tr>
 {% for d in data.days %}<tr><td>{{d.date[8:10]}}.{{d.date[5:7]}}.{{d.date[0:4]}}</td><td>{{"%.2f"|format(d.sales)}} TL</td><td>{{"%.2f"|format(d.expenses)}} TL</td><td>{{"%.2f"|format(d.after)}} TL</td><td>{{"%.2f"|format(d.worker)}} TL</td><td>{{"%.2f"|format(d.share)}} TL</td></tr>{% endfor %}</table></div>
 <h2>Masraf açıklamaları</h2><div class="tablewrap"><table><tr><th>Tarih</th><th>Saat</th><th>Açıklama</th><th>Tutar</th></tr>
