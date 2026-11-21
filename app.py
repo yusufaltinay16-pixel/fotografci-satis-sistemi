@@ -786,10 +786,20 @@ def accounting():
         exp_rows=c.execute("SELECT expense_date,expense_time,description,total_tl FROM expenses WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date,expense_time",(start,end)).fetchall()
         daily=c.execute("""SELECT sale_date,COALESCE(SUM(total_tl),0) revenue FROM sales WHERE sale_date BETWEEN ? AND ? GROUP BY sale_date""",(start,end)).fetchall()
         daily_exp=c.execute("""SELECT expense_date,COALESCE(SUM(total_tl),0) total FROM expenses WHERE expense_date BETWEEN ? AND ? GROUP BY expense_date""",(start,end)).fetchall()
+        invoice_total=float(c.execute("SELECT COALESCE(SUM(amount),0) n FROM purchase_invoices WHERE invoice_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
     revenue=float(sales["revenue"]); after=revenue-expenses
     worker=max(0,after)*float(settings["worker_percent"])/100
     profit=after-worker; share=profit/2
     card=float(sales["card"])
+    # Kullanıcının verdiği POS vergi oranları
+    taxable_net=card-invoice_total
+    pos_fee=card*0.02
+    vat_amount=taxable_net*0.0909
+    temporary_tax=(taxable_net-vat_amount)*0.15
+    total_tax=pos_fee+vat_amount+temporary_tax
+    murat_tax=total_tax*0.35
+    yusuf_tax=total_tax*0.325
+    muhlis_tax=total_tax*0.325
     # Kullanıcının istediği hesap özeti: kartın yazıldığı ortak +, diğer ortak - görünür.
     p1=share if settings["card_partner"]==1 else -share
     p2=share if settings["card_partner"]==2 else -share
@@ -803,7 +813,10 @@ def accounting():
         days.append({"date":key,"sales":rev,"expenses":cost,"after":net,"worker":w,"profit":net-w,"share":(net-w)/2})
         day+=timedelta(days=1)
     data={"settings":settings,"revenue":revenue,"expenses":expenses,"after":after,"worker":worker,"profit":profit,"share":share,
-          "p1":p1,"p2":p2,"diff1":p1,"diff2":p2,"card":card,"debtor_name":debtor_name,"debtor_amount":share,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows]}
+          "p1":p1,"p2":p2,"diff1":p1,"diff2":p2,"card":card,"debtor_name":debtor_name,"debtor_amount":share,"debt":debt,"days":days,"expense_rows":[dict(x) for x in exp_rows],
+          "pos_tax":{"card_sales":card,"invoices":invoice_total,"taxable_net":taxable_net,"pos_fee":pos_fee,
+          "vat":vat_amount,"temporary_tax":temporary_tax,"total":total_tax,
+          "murat":murat_tax,"yusuf":yusuf_tax,"muhlis":muhlis_tax}}
     return render_template("accounting.html",data=data,start=start,end=end)
 
 
@@ -830,6 +843,7 @@ def accounting_excel():
           FROM sales WHERE sale_date BETWEEN ? AND ?""",(start,end)).fetchone()
         settings=dict(conn.execute("SELECT * FROM accounting_settings WHERE id=1").fetchone())
         exp_total=float(conn.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
+        invoice_total=float(conn.execute("SELECT COALESCE(SUM(amount),0) n FROM purchase_invoices WHERE invoice_date BETWEEN ? AND ?",(start,end)).fetchone()["n"])
     expenses_sheet=wb.create_sheet("Masraf Açıklamaları")
     expenses_sheet.append(["MASRAF AÇIKLAMALARI"]); expenses_sheet.append(["Tarih","Saat","Açıklama","Tutar (TL)"])
     for e in expenses_detail: expenses_sheet.append([e["expense_date"],e["expense_time"],e["description"],float(e["total_tl"] or 0)])
@@ -846,6 +860,28 @@ def accounting_excel():
       [settings["partner1"],p1],[settings["partner2"],p2],
       ["kredi kartı",card],[f"{debtor_name} BORÇLU",share]]:
         partner_sheet.append(row)
+    # Ayrı POS vergi sayfası: oranlar kullanıcının verdiği oranlardır.
+    taxable_net=card-invoice_total
+    pos_fee=card*0.02
+    vat_amount=taxable_net*0.0909
+    temporary_tax=(taxable_net-vat_amount)*0.15
+    total_tax=pos_fee+vat_amount+temporary_tax
+    tax_sheet=wb.create_sheet("POS VERGİLER")
+    tax_sheet.append(["POS VERGİ HESABI"])
+    tax_sheet.append([f"Dönem: {start} - {end}"])
+    for row in [
+        ["Kredi kartı toplam satış",card],
+        ["Alış faturaları toplamı",invoice_total],
+        ["Vergiye tabi net kalan",taxable_net],
+        ["POS kesintisi (%2)",pos_fee],
+        ["KDV (%9,09)",vat_amount],
+        ["Geçici vergi (%15)",temporary_tax],
+        ["TOPLAM VERGİ",total_tax],
+        ["Murat (%35)",total_tax*0.35],
+        ["Yusuf (%32,5)",total_tax*0.325],
+        ["Muhlis (%32,5)",total_tax*0.325],
+    ]:
+        tax_sheet.append(row)
     out=BytesIO()
     for sh in wb.worksheets:
         sh.sheet_properties.pageSetUpPr.fitToPage=True; sh.page_setup.orientation="landscape"; sh.page_setup.paperSize=sh.PAPERSIZE_A4
