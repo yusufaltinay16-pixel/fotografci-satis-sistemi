@@ -4,7 +4,7 @@
   <h1>{% if edit_invoice %}Alış faturasını güncelle{% else %}Alış faturası kaydet{% endif %}</h1>
   <p class="muted">Yalnızca alış faturaları kaydedilir. Bu kayıtlar genel masraflara eklenmez; POS vergi hesabında kullanılmak üzere ayrı tutulur.</p>
   <form method="post" action="{% if edit_invoice %}{{url_for('edit_invoice', invoice_id=edit_invoice.id)}}{% else %}{{url_for('invoices')}}{% endif %}" class="formgrid">
-    <label>Fatura tarihi<input type="date" name="invoice_date" value="{{edit_invoice.invoice_date if edit_invoice else today}}" required></label>
+    <label>Fatura tarihi (Gün.Ay.Yıl)<input type="date" name="invoice_date" value="{{edit_invoice.invoice_date if edit_invoice else today}}" required></label>
     <label>Firma adı<input name="supplier" value="{{edit_invoice.supplier if edit_invoice else ''}}" required></label>
     <label>Fatura tutarı (TL)<input type="number" step="0.01" min="0.01" name="amount" value="{{edit_invoice.amount if edit_invoice else ''}}" required></label>
     <label>Açıklama<input name="description" value="{{edit_invoice.description if edit_invoice else ''}}"></label>
