@@ -243,7 +243,10 @@ def dashboard():
           COALESCE(SUM(CASE WHEN delivery_type='Ücretli baskı' THEN quantity ELSE 0 END),0) paid_print_qty,
           COALESCE(SUM(CASE WHEN delivery_type='Bedelsiz baskı' THEN quantity ELSE 0 END),0) free_print_qty,
           COALESCE(SUM(CASE WHEN delivery_type='Telefona gönderim' THEN quantity ELSE 0 END),0) phone_qty,
-          COALESCE(SUM(paper_count),0) paper_count
+          COALESCE(SUM(paper_count),0) paper_count,
+          COALESCE(SUM(CASE WHEN payment_type='Nakit' THEN total_tl ELSE 0 END),0) cash_total,
+          COALESCE(SUM(CASE WHEN payment_type='Kredi kartı' THEN total_tl ELSE 0 END),0) card_total,
+          COALESCE(SUM(CASE WHEN payment_type='IBAN' THEN total_tl ELSE 0 END),0) iban_total
           FROM sales WHERE sale_date BETWEEN ? AND ?{seller_filter}""", params).fetchone()
         if session["role"] == "admin":
             expenses = c.execute("SELECT COALESCE(SUM(total_tl),0) n FROM expenses WHERE expense_date BETWEEN ? AND ?", (start,end)).fetchone()["n"]
